@@ -202,7 +202,7 @@ ipcMain.handle('update:check', async () => {
   const asset = (data.assets || []).find(a => /\.exe$/i.test(a.name || ''));
   latestRelease = { build: latestBuild, url: asset ? asset.browser_download_url : null, name: asset ? asset.name : '', size: asset ? asset.size : 0 };
   return {
-    ok: true, current, build: BUILD, latest: latestBuild, title: data.name || data.tag_name, notes: (data.body || '').trim(), date: (data.published_at || '').slice(0, 10),
+    ok: true, current, build: BUILD, latest: latestBuild, title: data.name || data.tag_name, notes: (data.body || '').split(/\r?\n/).filter(l => !/^(Co-Authored-By|Claude-Session):/i.test(l.trim())).join('\n').trim(), date: (data.published_at || '').slice(0, 10),
     newer: BUILD > 0 && latestBuild > BUILD, dev: BUILD === 0, installerExists: !!latestRelease.url, page: data.html_url
   };
 });

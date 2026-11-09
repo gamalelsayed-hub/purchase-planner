@@ -3,21 +3,24 @@
   "productName": "PurchasePlanner",
   "version": "1.0.0",
   "description": "Demand forecasting and purchase ordering (Fixed Order Period)",
-  "main": "src/main.js",
+  "main": "src/main.bundle.js",
   "author": "Purchasing",
   "license": "UNLICENSED",
   "scripts": {
-    "start": "electron .",
+    "start": "npm run bundle && electron .",
     "test": "node test/engine.unit.test.js",
-    "dist": "electron-builder --win --x64",
+    "dist": "npm run bundle && electron-builder --win --x64",
     "test:unit": "node test/engine.unit.test.js",
-    "test:excel": "node test/engine.test.js"
+    "test:excel": "node test/engine.test.js",
+    "bundle": "esbuild src/main.js --bundle --platform=node --target=node20 --external:electron --outfile=src/main.bundle.js --log-level=warning"
   },
   "build": {
     "appId": "local.purchase.planner",
     "productName": "PurchasePlanner",
     "files": [
-      "src/**/*",
+      "src/main.bundle.js",
+      "src/preload.js",
+      "src/renderer/**/*",
       "package.json"
     ],
     "win": {
@@ -38,9 +41,8 @@
   },
   "devDependencies": {
     "electron": "^33.2.1",
-    "electron-builder": "^25.1.8"
-  },
-  "dependencies": {
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.24.0",
     "exceljs": "^4.4.0"
   }
 }
