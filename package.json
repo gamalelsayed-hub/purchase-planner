@@ -1,0 +1,44 @@
+{
+  "name": "purchase-planner",
+  "productName": "PurchasePlanner",
+  "version": "1.0.0",
+  "description": "Demand forecasting and purchase ordering (Fixed Order Period)",
+  "main": "src/main.js",
+  "author": "Purchasing",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/engine.test.js",
+    "dist": "electron-builder --win --x64"
+  },
+  "build": {
+    "appId": "local.purchase.planner",
+    "productName": "PurchasePlanner",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "PurchasePlanner-Setup-${version}.exe",
+      "createDesktopShortcut": true,
+      "shortcutName": "تخطيط المشتريات"
+    },
+    "publish": null
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0"
+  }
+}
