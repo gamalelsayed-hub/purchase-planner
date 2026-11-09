@@ -8,8 +8,10 @@
   "license": "UNLICENSED",
   "scripts": {
     "start": "electron .",
-    "test": "node test/engine.test.js",
-    "dist": "electron-builder --win --x64"
+    "test": "node test/engine.unit.test.js",
+    "dist": "electron-builder --win --x64",
+    "test:unit": "node test/engine.unit.test.js",
+    "test:excel": "node test/engine.test.js"
   },
   "build": {
     "appId": "local.purchase.planner",
@@ -28,7 +30,7 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "PurchasePlanner-Setup-${version}.exe",
+      "artifactName": "PurchasePlanner-Setup.exe",
       "createDesktopShortcut": true,
       "shortcutName": "تخطيط المشتريات"
     },

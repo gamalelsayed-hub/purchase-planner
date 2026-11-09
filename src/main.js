@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -21,7 +21,6 @@ function readCfg() {
 }
 function writeCfg(c) { fs.mkdirSync(app.getPath('userData'), { recursive: true }); fs.writeFileSync(cfgFile(), JSON.stringify(c, null, 2)); }
 const dataDir = () => readCfg().dataDir || defaultDataDir();
-const updatesDir = () => readCfg().updatesDir || path.join(dataDir(), 'updates');
 const dataFile = () => path.join(dataDir(), 'data.json');
 const lockFile = () => path.join(dataDir(), 'data.lock');
 // النسخ الاحتياطية محلية على الجهاز (لا تُزحم الدرايف)
@@ -92,7 +91,7 @@ ipcMain.handle('cfg:get', async () => {
   const dir = dataDir();
   let reachable = true;
   try { fs.mkdirSync(dir, { recursive: true }); fs.accessSync(dir, fs.constants.W_OK); } catch (e) { reachable = false; }
-  return { dataDir: dir, defaultDataDir: defaultDataDir(), isDefault: !readCfg().dataDir, updatesDir: updatesDir(), machine, version: app.getVersion(), reachable, backupDir: backupDir() };
+  return { dataDir: dir, defaultDataDir: defaultDataDir(), isDefault: !readCfg().dataDir, machine, version: app.getVersion(), reachable, backupDir: backupDir() };
 });
 ipcMain.handle('cfg:chooseDir', async (_e, title) => {
   const r = await dialog.showOpenDialog(win, { title, properties: ['openDirectory', 'createDirectory'] });
@@ -113,12 +112,6 @@ ipcMain.handle('cfg:setDataDir', async (_e, dir, mode) => {
     fs.copyFileSync(old, dataFile());
   }
   return true;
-});
-ipcMain.handle('cfg:setUpdatesDir', async (_e, dir) => {
-  const c = readCfg();
-  if (dir) c.updatesDir = dir; else delete c.updatesDir;
-  writeCfg(c);
-  return updatesDir();
 });
 
 // ---------- قاعدة البيانات ----------
@@ -178,37 +171,54 @@ ipcMain.handle('lock:acquire', async (_e, user, name) => {
 ipcMain.handle('lock:release', async () => { releaseLock(); return true; });
 
 // ---------- التحديثات ----------
-function cmpVer(a, b) {
-  const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
-  for (let i = 0; i < 3; i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d; }
-  return 0;
+// التحديثات من GitHub: كل رفع على main يبني ملف التثبيت (GitHub Actions) وينشره في مستودع التنزيلات العام.
+const RELEASES_REPO = 'gamalelsayed-hub/purchase-planner-releases';
+const BUILD = (() => { const m = String(app.getVersion()).match(/(\d+)$/); return m ? +m[1] : 0; })();
+let latestRelease = null;
+async function fetchLatest() {
+  const r = await net.fetch(`https://api.github.com/repos/${RELEASES_REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'PurchasePlanner' } });
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error('GitHub ' + r.status);
+  return r.json();
 }
 ipcMain.handle('update:check', async () => {
-  const dir = updatesDir();
-  const f = path.join(dir, 'latest.json');
-  if (!fs.existsSync(f)) return { ok: false, reason: 'noFile', dir, current: app.getVersion() };
-  let info;
-  try { info = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return { ok: false, reason: 'badFile', dir, current: app.getVersion() }; }
-  const installer = info.file ? path.join(dir, info.file) : null;
+  const current = app.getVersion();
+  let data;
+  try { data = await fetchLatest(); } catch (e) { return { ok: false, reason: 'network', error: e.message, current, page: `https://github.com/${RELEASES_REPO}/releases` }; }
+  if (!data) return { ok: false, reason: 'noRelease', current, page: `https://github.com/${RELEASES_REPO}/releases` };
+  const m = String(data.tag_name || '').match(/(\d+)$/);
+  const latestBuild = m ? +m[1] : 0;
+  const asset = (data.assets || []).find(a => /\.exe$/i.test(a.name || ''));
+  latestRelease = { build: latestBuild, url: asset ? asset.browser_download_url : null, name: asset ? asset.name : '', size: asset ? asset.size : 0 };
   return {
-    ok: true, dir, current: app.getVersion(), latest: info.version, notes: info.notes || '', date: info.date || '',
-    newer: cmpVer(info.version, app.getVersion()) > 0, installerExists: !!(installer && fs.existsSync(installer))
+    ok: true, current, build: BUILD, latest: latestBuild, title: data.name || data.tag_name, notes: (data.body || '').trim(), date: (data.published_at || '').slice(0, 10),
+    newer: BUILD > 0 && latestBuild > BUILD, dev: BUILD === 0, installerExists: !!latestRelease.url, page: data.html_url
   };
 });
 ipcMain.handle('update:install', async () => {
-  const dir = updatesDir();
-  const info = JSON.parse(fs.readFileSync(path.join(dir, 'latest.json'), 'utf8'));
-  const installer = path.join(dir, info.file);
-  if (!fs.existsSync(installer)) return { ok: false };
-  // ننسخ المثبت محليًا أولًا (الدرايف قد يكون بطيئًا أو يقفل الملف)
-  const local = path.join(app.getPath('temp'), info.file);
-  fs.copyFileSync(installer, local);
+  if (!latestRelease || !latestRelease.url) return { ok: false, error: 'لا يوجد ملف تثبيت' };
+  const local = path.join(app.getPath('temp'), latestRelease.name || 'PurchasePlanner-Setup.exe');
+  const r = await net.fetch(latestRelease.url);
+  if (!r.ok) return { ok: false, error: 'تعذر التنزيل ' + r.status };
+  const total = +r.headers.get('content-length') || latestRelease.size || 0;
+  const reader = r.body.getReader();
+  const out = fs.createWriteStream(local);
+  let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    got += value.length;
+    out.write(Buffer.from(value));
+    if (win && total) win.webContents.send('update:progress', Math.round(got / total * 100));
+  }
+  await new Promise(res => out.end(res));
   releaseLock();
   const err = await shell.openPath(local);
   if (err) return { ok: false, error: err };
   setTimeout(() => app.quit(), 1500);
   return { ok: true };
 });
+ipcMain.handle('app:openUrl', async (_e, url) => { if (/^https:\/\/github\.com\//.test(url)) shell.openExternal(url); });
 
 // ---------- ملفات ----------
 ipcMain.handle('file:openExcel', async (_e, opts = {}) => {
@@ -263,7 +273,7 @@ ipcMain.handle('backup:import', async () => {
   return fs.readFileSync(r.filePaths[0], 'utf8');
 });
 ipcMain.handle('app:openFolder', async (_e, which) => {
-  const p = which === 'backups' ? backupDir() : which === 'updates' ? updatesDir() : dataDir();
+  const p = which === 'backups' ? backupDir() : dataDir();
   fs.mkdirSync(p, { recursive: true });
   return shell.openPath(p);
 });

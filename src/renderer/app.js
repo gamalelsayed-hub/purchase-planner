@@ -250,7 +250,7 @@
       : 'لا توجد بيانات بعد') +
       `<div class="userbox"><b>${esc(ui.user.name)}</b> — ${ROLES[ui.user.role]}<br>${ui.readOnly ? '🔒 للعرض فقط' : '✎ وضع التعديل'}${ui.cfg && !ui.cfg.isDefault ? '<br>📁 مجلد مشترك' : ''}
         <div class="side-btns"><button class="sm" data-act="checkUpdate">فحص التحديثات</button><button class="sm" data-act="myPassword">كلمة المرور</button><button class="sm" data-act="logout">خروج</button></div>
-        <div class="small" style="opacity:.7">الإصدار ${ui.cfg ? ui.cfg.version : ''}</div></div>`;
+        <div class="small" style="opacity:.7">نسخة رقم ${ui.cfg ? (String(ui.cfg.version).split('.').pop() === '0' ? 'تطوير' : String(ui.cfg.version).split('.').pop()) : ''}</div></div>`;
   }
 
   function render() {
@@ -397,15 +397,23 @@
     let r;
     try { r = await api.checkUpdate(); } catch (e) { if (!silent) toast('تعذر فحص التحديثات: ' + e.message, 'bad'); return; }
     if (!r.ok) {
-      if (!silent) modal({ title: 'فحص التحديثات', size: 'narrow', body: `<p>الإصدار الحالي: <b>${esc(r.current)}</b></p><p class="hint">لا يوجد ملف تحديثات في: <br><code>${esc(r.dir)}</code><br>${r.reason === 'badFile' ? 'ملف latest.json غير صالح.' : 'ضع ملف latest.json وملف التثبيت في هذا المجلد على الدرايف (راجع الإعدادات ← التحديثات).'}</p>`, foot: '<button data-close>إغلاق</button>' });
+      if (!silent) toast(r.reason === 'noRelease' ? 'لا توجد نسخة منشورة بعد في مستودع التنزيلات' : 'تعذر الاتصال بـ GitHub لفحص التحديثات — تأكد من الإنترنت', 'bad');
       return;
     }
-    if (!r.newer) { if (!silent) toast(`✓ أنت على آخر إصدار (${r.current})`, 'ok'); return; }
+    if (!r.newer) { if (!silent) toast(r.dev ? `نسخة تطوير (${r.current}) — آخر نسخة منشورة رقم ${r.latest}` : `✓ أنت على آخر نسخة (رقم ${r.build})`, 'ok'); return; }
     modal({
       title: '⬆ يوجد تحديث جديد', size: 'narrow',
-      body: `<p>الإصدار الحالي: <b>${esc(r.current)}</b> — الجديد: <b>${esc(r.latest)}</b>${r.date ? ' (' + esc(r.date) + ')' : ''}</p>${r.notes ? `<div class="formula" style="white-space:pre-wrap">${esc(r.notes)}</div>` : ''}${r.installerExists ? '' : '<div class="banner bad">ملف التثبيت غير موجود في مجلد التحديثات بعد (ربما الدرايف لسه يزامن).</div>'}<p class="small">البيانات لا تتأثر بالتحديث. سيُغلق البرنامج ويفتح برنامج التثبيت.</p>`,
-      foot: `<button class="primary" data-ok ${r.installerExists ? '' : 'disabled'}>تثبيت التحديث</button><button data-close>لاحقًا</button>`,
-      onMount: m => { m.q('[data-ok]').onclick = async () => { await saveNow(); const x = await api.installUpdate(); if (!x.ok) toast('تعذر فتح ملف التثبيت ' + (x.error || ''), 'bad'); }; }
+      body: `<p>نسختك: <b>${r.build}</b> — الجديدة: <b>${r.latest}</b>${r.date ? ' (' + esc(r.date) + ')' : ''}</p>${r.notes ? `<div class="formula" style="white-space:pre-wrap;max-height:200px;overflow:auto">${esc(r.notes)}</div>` : ''}<p class="small">البيانات لا تتأثر بالتحديث. البرنامج ينزّل ملف التثبيت ثم يُغلق ويفتح التثبيت.</p><div id="upd_prog" class="small"></div>`,
+      foot: `<button class="primary" data-ok ${r.installerExists ? '' : 'disabled'}>تنزيل وتثبيت</button><button data-close>لاحقًا</button>`,
+      onMount: m => {
+        api.onUpdateProgress(p => { const el = document.getElementById('upd_prog'); if (el) el.textContent = 'جارِ التنزيل… ' + p + '%'; });
+        m.q('[data-ok]').onclick = async () => {
+          m.q('[data-ok]').disabled = true;
+          if (!ui.readOnly) { dirty = true; await saveNow(); }
+          const x = await api.installUpdate();
+          if (!x.ok) { toast('تعذر التحديث: ' + (x.error || ''), 'bad'); m.q('[data-ok]').disabled = false; }
+        };
+      }
     });
   }
 
@@ -1128,10 +1136,10 @@
       <table class="t" style="margin-top:10px"><tbody>
         <tr><td style="width:180px">مجلد البيانات على هذا الجهاز</td><td><code>${esc(ui.cfg ? ui.cfg.dataDir : '')}</code> ${ui.cfg && ui.cfg.isDefault ? '<span class="pill">محلي</span>' : '<span class="pill brand">مشترك</span>'}</td>
           <td><button class="sm" data-act="chooseShared">اختيار مجلد مشترك</button> ${ui.cfg && !ui.cfg.isDefault ? '<button class="sm" data-act="resetDataDir">الرجوع للمحلي</button>' : ''} <button class="sm" data-act="openData">فتح</button></td></tr>
-        <tr><td>مجلد التحديثات</td><td><code>${esc(ui.cfg ? ui.cfg.updatesDir : '')}</code></td><td><button class="sm" data-act="chooseUpdates">تغيير</button> <button class="sm" data-act="openUpdates">فتح</button> <button class="sm" data-act="checkUpdate">فحص التحديثات</button></td></tr>
+        <tr><td>التحديثات</td><td>من GitHub تلقائيًا عند الدخول</td><td><button class="sm" data-act="checkUpdate">فحص التحديثات</button></td></tr>
         <tr><td>هذا الجهاز</td><td>${esc(ui.cfg ? ui.cfg.machine : '')} — الإصدار ${esc(ui.cfg ? ui.cfg.version : '')}</td><td></td></tr>
       </tbody></table>
-      <p class="hint" style="margin-top:10px">لنشر تحديث: ضع ملف التثبيت الجديد وملف <code>latest.json</code> في مجلد التحديثات على الدرايف، مثال:<br><code dir="ltr">{"version": "1.1.0", "file": "PurchasePlanner-Setup-1.1.0.exe", "date": "2026-12-01", "notes": "ما الجديد"}</code></p>
+
     </div>`;
   };
 
@@ -1449,8 +1457,6 @@
       if (!await confirmBox('الرجوع لمجلد البيانات المحلي على هذا الجهاز؟ (الملف المشترك لا يُحذف)', { ok: 'رجوع' })) return;
       await api.setDataDir(null, 'default'); location.reload();
     },
-    chooseUpdates: async () => { const r = await api.chooseDir('اختر مجلد التحديثات'); if (r) { await api.setUpdatesDir(r.dir); ui.cfg = await api.cfg(); render(); } },
-    openUpdates: () => api.openFolder('updates'),
     clearColF: el => { const t = ui.tables[el.dataset.t]; t.filters = {}; t.page = 0; render(); },
     sort: el => { const t = ui.tables[el.dataset.t]; if (t.sort === el.dataset.k) t.dir = -t.dir; else { t.sort = el.dataset.k; t.dir = -1; } t.page = 0; render(); },
     page: el => { ui.tables[el.dataset.t].page = +el.dataset.p; render(); const w = $('#main .tbl-wrap'); if (w) w.scrollTop = 0; },

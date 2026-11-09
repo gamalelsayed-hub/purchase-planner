@@ -1,0 +1,50 @@
+name: Build Windows app
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      # مفتاح وصول لمستودع التنزيلات العام (سر في المستودع). البرنامج يفحص التحديثات من هناك لأن هذا المستودع خاص.
+      RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Tests
+        run: npm run test:unit
+      - name: Stamp build number
+        run: npm version 1.0.${{ github.run_number }} --no-git-tag-version
+      - name: Build installer
+        run: npx electron-builder --win nsis --x64 --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PurchasePlanner-windows
+          path: dist/PurchasePlanner-Setup.exe
+      - name: Publish release
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git log -1 --pretty=%B | Out-File -Encoding utf8 notes.txt
+          gh release create "build-${{ github.run_number }}" dist/PurchasePlanner-Setup.exe `
+            --title "نسخة رقم ${{ github.run_number }}" --notes-file notes.txt --target "${{ github.sha }}"
+      - name: Publish to downloads repository
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && env.RELEASES_TOKEN != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ env.RELEASES_TOKEN }}
+        run: |
+          gh release create "build-${{ github.run_number }}" dist/PurchasePlanner-Setup.exe `
+            -R gamalelsayed-hub/purchase-planner-releases --title "نسخة رقم ${{ github.run_number }}" --notes-file notes.txt
