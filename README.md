@@ -8,7 +8,7 @@ Windows desktop app (Electron) for monthly demand forecasting and purchase order
 - Multiple units per item with conversion factors; orders in purchase unit
 - Excel import (items, sales, stock, in-transit, legacy workbook) and Excel/PDF export
 - Users with roles (admin / purchasing / viewer), edit lock for shared Google Drive folder
-- Auto-update from GitHub releases (`gamalelsayed-hub/purchase-planner-releases`)
+- Auto-update from GitHub releases (this repository, or `purchase-planner-releases` if present)
 
 See [دليل-الاستخدام.md](دليل-الاستخدام.md) for the Arabic user guide.
 
@@ -27,6 +27,6 @@ npm run dist       # build Windows installer locally (needs wine on Linux)
 Every push to `main` runs `.github/workflows/build.yml` on `windows-latest`: tests, stamps version `1.0.<run number>`,
 builds `PurchasePlanner-Setup.exe`, creates release `build-<n>` here, and — when the repository secret `RELEASES_TOKEN`
 is set (token with Contents read/write on `gamalelsayed-hub/purchase-planner-releases`) — publishes the same release to
-that public downloads repository. The app checks `releases/latest` of the downloads repository for updates.
+that public downloads repository. The app checks `releases/latest` of both repositories and takes the newest build. Anonymous checks only work while the repository is public.
 
-Download link: https://github.com/gamalelsayed-hub/purchase-planner-releases/releases/latest/download/PurchasePlanner-Setup.exe
+Download link: https://github.com/gamalelsayed-hub/purchase-planner/releases/latest/download/PurchasePlanner-Setup.exe

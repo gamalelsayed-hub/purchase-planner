@@ -171,21 +171,32 @@ ipcMain.handle('lock:acquire', async (_e, user, name) => {
 ipcMain.handle('lock:release', async () => { releaseLock(); return true; });
 
 // ---------- التحديثات ----------
-// التحديثات من GitHub: كل رفع على main يبني ملف التثبيت (GitHub Actions) وينشره في مستودع التنزيلات العام.
+// التحديثات من GitHub: كل رفع على main يبني ملف التثبيت (GitHub Actions) وينشره كإصدار build-N.
+// نفحص مستودع الكود (إذا كان عامًا) ومستودع التنزيلات (إذا وُجد) ونأخذ الأحدث — نفس طريقة برنامج المطابقة.
+const REPO = 'gamalelsayed-hub/purchase-planner';
 const RELEASES_REPO = 'gamalelsayed-hub/purchase-planner-releases';
 const BUILD = (() => { const m = String(app.getVersion()).match(/(\d+)$/); return m ? +m[1] : 0; })();
 let latestRelease = null;
-async function fetchLatest() {
-  const r = await net.fetch(`https://api.github.com/repos/${RELEASES_REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'PurchasePlanner' } });
+const buildOf = d => { const m = String((d && d.tag_name) || '').match(/(\d+)$/); return m ? +m[1] : 0; };
+async function fetchRepo(repo) {
+  const r = await net.fetch(`https://api.github.com/repos/${repo}/releases/latest`, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'PurchasePlanner' } });
   if (r.status === 404) return null;
   if (!r.ok) throw new Error('GitHub ' + r.status);
   return r.json();
 }
+async function fetchLatest() {
+  const found = []; let err = null;
+  for (const repo of [RELEASES_REPO, REPO]) {
+    try { const d = await fetchRepo(repo); if (d && buildOf(d)) found.push(d); } catch (e) { err = e; }
+  }
+  if (!found.length) { if (err) throw err; return null; }
+  return found.sort((x, y) => buildOf(y) - buildOf(x))[0];
+}
 ipcMain.handle('update:check', async () => {
   const current = app.getVersion();
   let data;
-  try { data = await fetchLatest(); } catch (e) { return { ok: false, reason: 'network', error: e.message, current, page: `https://github.com/${RELEASES_REPO}/releases` }; }
-  if (!data) return { ok: false, reason: 'noRelease', current, page: `https://github.com/${RELEASES_REPO}/releases` };
+  try { data = await fetchLatest(); } catch (e) { return { ok: false, reason: 'network', error: e.message, current, page: `https://github.com/${REPO}/releases` }; }
+  if (!data) return { ok: false, reason: 'noRelease', current, page: `https://github.com/${REPO}/releases` };
   const m = String(data.tag_name || '').match(/(\d+)$/);
   const latestBuild = m ? +m[1] : 0;
   const asset = (data.assets || []).find(a => /\.exe$/i.test(a.name || ''));
