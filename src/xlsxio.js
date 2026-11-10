@@ -89,6 +89,13 @@ async function writeWorkbook(filePath, spec) {
       });
     }
     if (sh.rows.length) ws.autoFilter = { from: { row: firstData - 1, column: 1 }, to: { row: firstData - 1, column: ncol } };
+    // قائمة منسدلة لعمود (مثل حالات المعاملة) من نطاق في ورقة ثانية — للأسطر الموجودة + 500 سطر فاضي
+    sh.columns.forEach((col, i) => {
+      if (!col.listRef) return;
+      for (let rr = firstData; rr <= firstData + sh.rows.length + 500; rr++) {
+        ws.getCell(rr, i + 1).dataValidation = { type: 'list', allowBlank: true, showErrorMessage: true, errorStyle: 'warning', errorTitle: 'حالة غير معتمدة', error: 'اختر الحالة من القائمة', formulae: [col.listRef] };
+      }
+    });
   }
   await wb.xlsx.writeFile(filePath);
 }

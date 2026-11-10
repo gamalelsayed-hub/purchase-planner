@@ -132,6 +132,8 @@
       classifyScope: 'all', // all = كل الأصناف ، active = النشطة فقط
       cashHorizonDays: 60, // أفق الكاش المطلوب (يوم)
       shipTransitDays: 30, // مدة الشحن من تاريخ الشحن حتى الوصول (يوم)
+      defaultFreeDays: 14, // أيام السماح للحاوية من وصول الميناء حتى تسليمها فارغة (إذا الوكيل ما له مدة خاصة)
+      demurrageWarnDays: 3, // تنبيه قبل انتهاء أيام السماح بكم يوم
       poAsTransit: false, // خصم الكمية المتبقية في أوامر الشراء المفتوحة من الطلب كبضاعة بالطريق
       defaultType: 'مصنع',
       defaultLead: 1,
@@ -158,6 +160,8 @@
       ],
       currencies: [{ code: 'SAR', name: 'ريال', rate: 1 }, { code: 'USD', name: 'دولار', rate: 3.75 }],
       po: { orders: {}, imports: [] },
+      shipStages: defaultShipStages(),
+      parties: [],
       classes: defaultClasses(),
       groups: ['غير مصنف'],
       exceptions: [],
@@ -384,6 +388,11 @@
       { id: 'stockDup', title: 'أصناف مكررة في تقرير المخزون', count: [...stockDup.values()].filter(v => v > 1).length, sev: 'w', where: 'المخزون', why: 'تُجمع كمياتها — تأكد أنها ليست لصقًا مكررًا' },
       { id: 'transitDup', title: 'أصناف بالطريق من أكثر من سطر/مصدر', count: [...transitDup.values()].filter(v => v > 1).length, sev: 'w', where: 'بالطريق', why: 'تتجمع — تأكد أنها أوامر مختلفة' },
       { id: 'transitBoth', title: 'أصناف بالطريق من أمر شراء ومن إدخال يدوي معًا', count: count(r => r.transitPo > 0 && r.transitManual > 0), sev: 'w', where: 'المبيعات والمخزون ← بالطريق', why: 'تأكد أن السطر اليدوي ليس نفس أمر الشراء (يُخصم مرتين)' },
+      ...(() => { const ts = trackSummary(db).filter(t => !t.closed); return [
+        { id: 'trackLate', title: 'معاملات خارجية متأخرة في مرحلتها (عدّت المدة المتوقعة)', count: ts.filter(t => t.late && (t.status === 'open' || t.containersOpen)).length, sev: 'w', where: 'المعاملات الخارجية ← فلتر «متأخرة»', why: 'تابع مع الجهة المسؤولة عن المرحلة' },
+        { id: 'demurrage', title: 'حاويات تجاوزت أيام السماح (غرامة تأخير)', count: ts.reduce((a, t) => a + t.containers.filter(c => c.overdue).length, 0), sev: 'x', where: 'المعاملات الخارجية ← الحاويات', why: 'كل يوم تأخير عليه غرامة من الوكيل — سلّم الحاوية فارغة' },
+        { id: 'demurrageSoon', title: 'حاويات قربت تنتهي أيام السماح', count: ts.reduce((a, t) => a + t.containers.filter(c => c.soon).length, 0), sev: 'w', where: 'المعاملات الخارجية ← الحاويات', why: 'سلّمها فارغة قبل الموعد' }
+      ]; })(),
       { id: 'poShipLate', title: 'أوامر صادرة تأخر شحنها (عدّت مدة التجهيز بدون بوليصة)', count: poSummary(db).filter(o => o.shipLate).length, sev: 'w', where: 'أوامر الشراء ← فلتر «تأخر الشحن»', why: 'تابع مع المورد، أو علّمه «تم الشحن» إذا صدرت البوليصة' },
       { id: 'poOverdue', title: 'أوامر شراء مفتوحة تجاوزت تاريخ الوصول المتوقع', count: poSummary(db).filter(o => o.status === 'open' && o.daysToEta != null && o.daysToEta < 0).length, sev: 'w', where: 'أوامر الشراء', why: 'حدّث التاريخ المتوقع أو علّمه «وصل المخزون»' },
       { id: 'negSales', title: 'أسطر مبيعات صافيها سالب (مرتجع أكبر من المنصرف)', count: negSalesRows, sev: 'w', where: 'المبيعات', why: 'تقلل المتوسط — تأكد أنها صحيحة' },
@@ -479,7 +488,12 @@
     const d = poPrepDays(db, o);
     return d > 0 ? addDaysDate(o.poDate || o.firstSeen, d) : '';
   }
-  function poAutoEta(db, o) {
+  function poAutoEta(db, o, todayIso) {
+    // إذا الأمر عليه متابعة مراحل: الوصول = دخول المرحلة الحالية + مدد المراحل الباقية
+    if (o.track && o.track.stage && (db.shipStages || []).length) {
+      const t = trackSummary(db, todayIso, o.no)[0];
+      if (t && t.etaStages) return t.etaStages;
+    }
     const transit = num((db.settings || {}).shipTransitDays) || 30;
     if (o.shipped && (o.shipDate || o.shippedAt)) return addDaysDate(o.shipDate || o.shippedAt, transit);
     const exp = poExpectedShip(db, o);
@@ -505,7 +519,7 @@
       const totalSar = (value + shipping) * rate + extrasSar;
       const paidSar = (o.payments || []).reduce((a, p) => a + num(p.amount) * (num(p.rate) > 0 ? num(p.rate) : fxRate(db, p.currency || o.currency)), 0);
       const dueSar = Math.max(0, totalSar - paidSar);
-      const eta = o.etaManual && o.eta ? o.eta : poAutoEta(db, o);
+      const eta = o.etaManual && o.eta ? o.eta : poAutoEta(db, o, today);
       const expShip = o.status === 'open' && !o.shipped ? poExpectedShip(db, o) : '';
       const shipLateDays = expShip ? Math.round((new Date(today + 'T00:00:00Z') - new Date(expShip + 'T00:00:00Z')) / 86400000) : 0;
       const daysToEta = eta ? Math.round((new Date(eta + 'T00:00:00Z') - new Date(today + 'T00:00:00Z')) / 86400000) : null;
@@ -519,8 +533,101 @@
     });
   }
 
+  // ---------- متابعة المعاملات الخارجية (مراحل أمر الشراء حتى تسليم الحاوية فارغة) ----------
+  // كل مرحلة: الاسم، الجهة المسؤولة، المدة المتوقعة (يوم، فارغ = بدون تنبيه)،
+  // marks: shipped = دخولها يعني «تم الشحن» ، received = «وصل المخزون» ، port = وصول الميناء (بداية أيام السماح) ، final = نهاية المعاملة
+  function defaultShipStages() {
+    const s = (id, name, party, days, marks) => ({ id, name, party, days, marks: marks || '' });
+    return [
+      s('issue', 'إصدار أمر الشراء', 'المشتريات', 2),
+      s('sent', 'إرسال الأمر للمورد والوكيل', 'المشتريات', 2),
+      s('agreed', 'تأكيد الاتفاق على التوريد والأصناف', 'الوكيل', 7),
+      s('prep', 'تجهيز البضاعة عند المورد', 'المورد', 45),
+      s('freight', 'التفاوض على الشحن (الشركة، القيمة، الموعد)', 'الوكيل', 7),
+      s('freightOk', 'تأكيد اتفاق الشحن', 'الوكيل', 3),
+      s('shipped', 'تم الشحن — الشحنة في الطريق', 'الوكيل', 30, 'shipped'),
+      s('docs', 'استلام الأوراق (بوليصة/تلكس، فاتورة، Packing List)', 'الوكيل', 5),
+      s('toClearer', 'إرسال الأوراق للمخلّص', 'المشتريات', 2),
+      s('port', 'وصلت الميناء', 'المخلّص', 3, 'port'),
+      s('customs', 'التخليص الجمركي', 'المخلّص', 5),
+      s('released', 'خروج من الميناء', 'المخلّص', 2),
+      s('warehouse', 'وصول المستودع والاستلام', 'المستودع', 3, 'received'),
+      s('emptyReturned', 'تسليم الحاوية فارغة للوكيل', 'المخلّص', '', 'final')
+    ];
+  }
+  const dayDiff = (a, b) => Math.round((new Date(a + 'T00:00:00Z') - new Date(b + 'T00:00:00Z')) / 86400000);
+  // المرحلة الحالية: المحفوظة، أو ضمنية من الحالة (صادر/تم الشحن/وصل)
+  function trackStageIndex(db, o) {
+    const st = db.shipStages || [];
+    const t = o.track || {};
+    if (t.stage) { const i = st.findIndex(x => x.id === t.stage); if (i >= 0) return i; }
+    const find = m => st.findIndex(x => x.marks === m);
+    if (o.status === 'received') { const i = find('received'); return i >= 0 ? i : st.length - 1; }
+    if (o.shipped) { const i = find('shipped'); return i >= 0 ? i : 0; }
+    return 0;
+  }
+  // تحديث مرحلة الأمر + تطبيق أثرها على الحالة العامة
+  function setTrackStage(db, o, stageId, { date, by, note, source } = {}) {
+    const st = db.shipStages || [];
+    const i = st.findIndex(x => x.id === stageId); if (i < 0) return false;
+    const day = date || new Date().toISOString().slice(0, 10);
+    o.track = o.track || { history: [], containers: [] };
+    o.track.history = o.track.history || [];
+    o.track.stage = stageId; o.track.stageAt = day;
+    o.track.history.push({ stage: stageId, at: day, by: by || '', note: note || '', source: source || 'manual', ts: new Date().toISOString() });
+    const reached = m => { const k = st.findIndex(x => x.marks === m); return k >= 0 && i >= k; };
+    if (reached('shipped') && !o.shipped) { o.shipped = true; o.shippedAt = o.shipDate || day; o.shippedBy = 'stage'; }
+    if (reached('port') && !o.track.portAt) o.track.portAt = day;
+    if (reached('received') && o.status === 'open') { o.status = 'received'; o.receivedAt = day; o.receivedBy = 'stage'; o.receivedNote = st[i].name; }
+    o.track.closed = st[i].marks === 'final';
+    return true;
+  }
+  const partyById = (db, id) => (db.parties || []).find(p => p.id === id) || null;
+  function trackSummary(db, todayIso, onlyNo) {
+    const today = todayIso || new Date().toISOString().slice(0, 10);
+    const st = db.shipStages || [];
+    const s = db.settings || {};
+    const warnDays = num(s.demurrageWarnDays) || 3;
+    const recvIdx = st.findIndex(x => x.marks === 'received');
+    const orders = (db.po && db.po.orders) || {};
+    const shipIdx = st.findIndex(x => x.marks === 'shipped'), portIdx = st.findIndex(x => x.marks === 'port');
+    return Object.keys(orders).filter(no => !onlyNo || no === onlyNo).map(no => {
+      const o = orders[no], t = o.track || {};
+      const idx = trackStageIndex(db, o), stage = st[idx] || { name: '—', days: '' };
+      const since = t.stageAt || (idx === 0 ? (o.poDate || o.firstSeen) : (stage.marks === 'shipped' ? (o.shipDate || o.shippedAt) : stage.marks === 'received' ? o.receivedAt : '')) || '';
+      const daysIn = since ? dayDiff(today, since) : null;
+      const late = stage.days !== '' && stage.days != null && num(stage.days) > 0 && daysIn != null && daysIn > num(stage.days) && !t.closed;
+      // الوصول المتوقع من المراحل: تاريخ دخول المرحلة الحالية + مدد المراحل الباقية حتى المستودع
+      let etaStages = '';
+      if (t.stage && since && recvIdx > idx) {
+        let sum = Math.max(num(stage.days), daysIn || 0);
+        for (let k = idx + 1; k < recvIdx; k++) sum += num(st[k].days);
+        etaStages = addDaysDate(since, sum);
+      }
+      // الحاويات وأيام السماح: من وصول الميناء حتى تسليمها فارغة
+      const fw = partyById(db, t.forwarder);
+      const freeDays = num(t.freeDays) || (fw && num(fw.freeDays)) || num(s.defaultFreeDays) || 14;
+      const containers = (t.containers || []).map(c => {
+        const start = c.portAt || t.portAt || '';
+        const deadline = start ? addDaysDate(start, freeDays) : '';
+        const left = deadline && !c.emptyAt ? dayDiff(deadline, today) : null;
+        return Object.assign({}, c, { deadline, left, overdue: left != null && left < 0, soon: left != null && left >= 0 && left <= warnDays });
+      });
+      const openCont = containers.filter(c => !c.emptyAt);
+      const minLeft = openCont.filter(c => c.left != null).reduce((m, c) => Math.min(m, c.left), Infinity);
+      const group = t.closed ? 'منتهية' : (shipIdx >= 0 && idx < shipIdx) ? 'عند المورد' : (portIdx >= 0 && idx < portIdx) ? 'تحت الشحن' : (recvIdx >= 0 && idx < recvIdx) ? 'عند المخلّص / الميناء' : 'في المستودع';
+      return {
+        no, stageIdx: idx, stageId: stage.id, stageName: stage.name, party: stage.party || '', since, daysIn, stageDays: stage.days, late, closed: !!t.closed, group,
+        forwarder: fw ? fw.name : '', clearer: (partyById(db, t.clearer) || {}).name || '', docType: t.docType || '', blNo: o.blNo || '',
+        containers, containersOpen: openCont.length, freeDays, demurrageLeft: isFinite(minLeft) ? minLeft : null,
+        demurrageOverdue: openCont.some(c => c.overdue), demurrageSoon: !openCont.some(c => c.overdue) && openCont.some(c => c.soon),
+        etaStages, history: t.history || [], supplier: o.supplier || '', status: o.status, foreign: !!(o.track || (o.currency && o.currency !== ((db.currencies || [])[0] || {}).code))
+      };
+    });
+  }
+
   const Engine = {
-    compute, openPoLines, poSummary, poAutoEta, poPrepDays, poExpectedShip, addDaysDate, stageOf, STAGE_LABEL, poLead, addMonthsDate, fxRate, normsinv, normUnit, normCode, num, toMonth, monthAdd, monthLabel,
+    compute, openPoLines, poSummary, defaultShipStages, trackStageIndex, setTrackStage, trackSummary, poAutoEta, poPrepDays, poExpectedShip, addDaysDate, stageOf, STAGE_LABEL, poLead, addMonthsDate, fxRate, normsinv, normUnit, normCode, num, toMonth, monthAdd, monthLabel,
     unitFactor, purchaseFactor, allUnits, emptyDb, defaultSettings, defaultClasses, abc, roundUp, exceptionApplies
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Engine;

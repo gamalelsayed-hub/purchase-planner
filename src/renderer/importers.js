@@ -94,6 +94,20 @@
         { key: 'note', label: 'ملاحظة', aliases: ['ملاحظة', 'ملاحظات', 'note'] }
       ]
     },
+    track: {
+      title: 'تحديث المخلّص / الوكيل',
+      fields: [
+        { key: 'poNo', label: 'رقم أمر الشراء', aliases: ['رقم أمر الشراء', 'رقم الأمر', 'رقم الامر', 'امر الشراء', 'po'] },
+        { key: 'blNo', label: 'رقم البوليصة', aliases: ['رقم البوليصة', 'البوليصة', 'بوليصة الشحن', 'bl', 'blno', 'b/l', 'رقم التلكس'] },
+        { key: 'containerNo', label: 'رقم الحاوية', aliases: ['رقم الحاوية', 'الحاوية', 'container', 'containerno', 'cntr'] },
+        { key: 'status', label: 'حالة المعاملة', aliases: ['حالة المعاملة', 'الحالة', 'حالة الشحنة', 'status'] },
+        { key: 'statusDate', label: 'تاريخ الحالة', aliases: ['تاريخ الحالة', 'التاريخ', 'تاريخ التحديث', 'date'] },
+        { key: 'portDate', label: 'تاريخ وصول الميناء', aliases: ['تاريخ وصول الميناء', 'وصول الميناء', 'تاريخ الوصول', 'eta port', 'arrival'] },
+        { key: 'warehouseDate', label: 'تاريخ الوصول للمستودع', aliases: ['تاريخ الوصول للمستودع', 'وصول المستودع', 'تاريخ التسليم للمستودع'] },
+        { key: 'emptyDate', label: 'تاريخ تسليم الحاوية فارغة', aliases: ['تاريخ تسليم الحاوية فارغة', 'تسليم الفارغ', 'إرجاع الحاوية', 'empty return'] },
+        { key: 'note', label: 'ملاحظة', aliases: ['ملاحظة', 'ملاحظات', 'note'] }
+      ]
+    },
     transit: {
       title: 'البضاعة بالطريق',
       fields: [
@@ -397,6 +411,68 @@
     return res;
   }
 
+  // ---------- تحديث المخلّص / الوكيل (المتابعة الخارجية) ----------
+  // المطابقة: رقم الأمر ← رقم البوليصة ← رقم الحاوية. الحالة تتحول لمرحلة من جدول تحويل الجهة ثم الجدول العام.
+  function mapTrackStatus(db, text, partyId) {
+    const t = norm(text); if (!t) return '';
+    const party = (db.parties || []).find(p => p.id === partyId);
+    const maps = [].concat((party && party.statusMap) || [], db.trackStatusMap || []);
+    for (const m of maps) if (m.text && m.stage && norm(m.text) === t) return m.stage;
+    for (const m of maps) if (m.text && m.stage && (t.includes(norm(m.text)) || norm(m.text).includes(t))) return m.stage;
+    // اسم المرحلة نفسه
+    const st = (db.shipStages || []).find(x => norm(x.name) === t || norm(x.id) === t);
+    return st ? st.id : '';
+  }
+  function applyTrack(db, recs, { date, user, partyId, file, allowBack } = {}) {
+    const E = (typeof module !== 'undefined' && module.exports) ? require('./engine.js') : root.Engine;
+    const po = ensurePo(db);
+    const day = date || new Date().toISOString().slice(0, 10);
+    const orders = Object.values(po.orders);
+    const res = { rows: 0, matched: new Set(), notFound: [], unmapped: {}, advanced: [], containersAdded: 0 };
+    const stageIdx = id => (db.shipStages || []).findIndex(x => x.id === id);
+    for (const r of recs) {
+      res.rows++;
+      const cn = String(r.containerNo || '').trim().toUpperCase();
+      const o = (r.poNo && po.orders[r.poNo]) || (r.blNo && orders.find(x => x.blNo && norm(x.blNo) === norm(r.blNo))) ||
+        (cn && orders.find(x => ((x.track || {}).containers || []).some(c => c.no === cn)));
+      if (!o) { res.notFound.push(r.poNo || r.blNo || cn || '?'); continue; }
+      res.matched.add(o.no);
+      o.track = o.track || { history: [], containers: [] };
+      o.track.containers = o.track.containers || [];
+      if (r.blNo && !o.blNo) o.blNo = String(r.blNo).trim();
+      if (partyId && !o.track.clearer) o.track.clearer = partyId;
+      if (cn) {
+        let c = o.track.containers.find(x => x.no === cn);
+        if (!c) { c = { no: cn }; o.track.containers.push(c); res.containersAdded++; }
+        const pd = toDate(r.portDate); if (pd) c.portAt = pd;
+        const wd = toDate(r.warehouseDate); if (wd) c.warehouseAt = wd;
+        const ed = toDate(r.emptyDate); if (ed) c.emptyAt = ed;
+      } else {
+        const pd = toDate(r.portDate); if (pd) o.track.portAt = pd;
+      }
+      if (r.status != null && String(r.status).trim()) {
+        const txt = String(r.status).trim();
+        o.track.lastStatus = txt; o.track.lastStatusAt = toDate(r.statusDate) || day;
+        const sid = mapTrackStatus(db, txt, partyId || o.track.clearer);
+        if (!sid) { res.unmapped[txt] = (res.unmapped[txt] || 0) + 1; continue; }
+        const cur = E.trackStageIndex(db, o), nxt = stageIdx(sid);
+        if (nxt > cur || (allowBack && nxt !== cur)) {
+          E.setTrackStage(db, o, sid, { date: toDate(r.statusDate) || day, by: user || '', note: txt + (r.note ? ' — ' + r.note : ''), source: 'sheet' });
+          res.advanced.push(o.no);
+        }
+      }
+    }
+    // كل الحاويات سُلّمت فارغة ← المعاملة منتهية
+    for (const no of res.matched) {
+      const o = po.orders[no], cs = (o.track.containers || []);
+      const fin = (db.shipStages || []).find(x => x.marks === 'final');
+      if (fin && cs.length && cs.every(c => c.emptyAt) && o.track.stage !== fin.id) { E.setTrackStage(db, o, fin.id, { date: cs.map(c => c.emptyAt).sort().pop(), by: user || '', note: 'كل الحاويات سُلّمت فارغة', source: 'sheet' }); res.advanced.push(no); }
+    }
+    po.imports.push({ at: new Date().toISOString(), date: day, kind: 'track', file: file || '', user: user || '', orders: res.matched.size, newOrders: 0 });
+    res.matched = [...res.matched];
+    return res;
+  }
+
   // ---------- استيراد ملف الإكسيل القديم (نفس هيكل ملف تقرير المشتريات) ----------
   function isLegacyWorkbook(sheets) {
     const names = sheets.map(s => s.name);
@@ -498,7 +574,7 @@
     if (/يورو|eur/i.test(t)) return 'EUR';
     return '';
   }
-  const Importers = { currencyFromHeader, KINDS, applyPOs, applyPOPay, toDate, curCode, detectHeader, rowsToRecords, applyItems, applySales, applyStock, applyTransit, autoAddItems, importLegacy, isLegacyWorkbook, syncGroups, parseActive };
+  const Importers = { applyTrack, mapTrackStatus, currencyFromHeader, KINDS, applyPOs, applyPOPay, toDate, curCode, detectHeader, rowsToRecords, applyItems, applySales, applyStock, applyTransit, autoAddItems, importLegacy, isLegacyWorkbook, syncGroups, parseActive };
   if (typeof module !== 'undefined' && module.exports) module.exports = Importers;
   else root.Importers = Importers;
 })(typeof window !== 'undefined' ? window : globalThis);

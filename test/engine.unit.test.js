@@ -150,4 +150,59 @@ assert.strictEqual(p1b.payStatus, 'مسدد جزئيًا');
 // عملة من عنوان العمود
 assert.strictEqual(I.currencyFromHeader('القيمة دولار'), 'USD');
 
+// متابعة المعاملات الخارجية: المراحل، التأخير، الحاويات وأيام السماح
+db = baseDb(); db.settings.poAsTransit = true; db.transit = [];
+I.applyPOs(db, [{ poNo: 'T1', code: 'A1', unit: 'كرتون', qty: 10, value: 1000, invQty: 0 }], { date: '2026-07-01' });
+const T1 = db.po.orders.T1;
+assert.strictEqual(E.trackStageIndex(db, T1), 0, 'implicit stage = issue');
+E.setTrackStage(db, T1, 'prep', { date: '2026-07-05', by: 'x' });
+let tr = E.trackSummary(db, '2026-08-25').find(t => t.no === 'T1');
+assert.strictEqual(tr.stageId, 'prep'); assert.strictEqual(tr.group, 'عند المورد'); assert.ok(tr.late, 'prep 45 days exceeded (51)');
+assert.strictEqual(tr.daysIn, 51);
+// الشحن يحوّل الحالة العامة «تم الشحن»
+E.setTrackStage(db, T1, 'shipped', { date: '2026-08-26' });
+assert.ok(T1.shipped); assert.strictEqual(E.poSummary(db, '2026-08-26').find(o => o.no === 'T1').stage, 'shipped');
+tr = E.trackSummary(db, '2026-08-26').find(t => t.no === 'T1');
+assert.strictEqual(tr.group, 'تحت الشحن');
+// الوصول من المراحل: 26/8 + شحن 30 + أوراق 5 + للمخلّص 2 + ميناء 3 + تخليص 5 + خروج 2 = +47 يوم
+assert.strictEqual(tr.etaStages, '2026-10-12'); assert.strictEqual(E.poSummary(db, '2026-08-26').find(o => o.no === 'T1').eta, '2026-10-12');
+// وصول الميناء يبدأ أيام السماح (14 افتراضي) للحاويات
+T1.track.containers = [{ no: 'MSKU1' }, { no: 'MSKU2' }];
+E.setTrackStage(db, T1, 'port', { date: '2026-09-28' });
+tr = E.trackSummary(db, '2026-10-09').find(t => t.no === 'T1');
+assert.strictEqual(tr.group, 'عند المخلّص / الميناء'); assert.strictEqual(tr.containers[0].deadline, '2026-10-12');
+assert.ok(tr.demurrageSoon && !tr.demurrageOverdue, '3 days left = warn');
+T1.track.containers[1].emptyAt = '2026-10-10';
+tr = E.trackSummary(db, '2026-10-15').find(t => t.no === 'T1');
+assert.ok(tr.demurrageOverdue); assert.strictEqual(tr.containersOpen, 1);
+assert.strictEqual(E.compute(db).checks.find(c => c.id === 'demurrage').count, 1);
+// وكيل بأيام سماح خاصة
+db.parties = [{ id: 'f1', kind: 'forwarder', name: 'وكيل', freeDays: 21 }]; T1.track.forwarder = 'f1';
+tr = E.trackSummary(db, '2026-10-15').find(t => t.no === 'T1');
+assert.strictEqual(tr.containers[0].deadline, '2026-10-19'); assert.ok(!tr.demurrageOverdue);
+// وصول المستودع ← «وصل المخزون» (ينشال من بالطريق) — والمعاملة تبقى لين تسليم الحاوية فارغة
+E.setTrackStage(db, T1, 'warehouse', { date: '2026-10-16' });
+assert.strictEqual(T1.status, 'received'); close(E.compute(db).rows[0].transit, 0, 'received removed from transit');
+assert.ok(!E.trackSummary(db, '2026-10-16').find(t => t.no === 'T1').closed);
+E.setTrackStage(db, T1, 'emptyReturned', { date: '2026-10-20' });
+tr = E.trackSummary(db, '2026-10-20').find(t => t.no === 'T1');
+assert.ok(tr.closed); assert.strictEqual(tr.group, 'منتهية'); assert.strictEqual(T1.track.history.length, 5);
+
+// شيت المخلّص: مطابقة بالبوليصة، حالة مُحوّلة، حاويات
+db = baseDb();
+I.applyPOs(db, [{ poNo: 'K1', code: 'A1', unit: 'كرتون', qty: 5, value: 100, invQty: 0 }], { date: '2026-07-01' });
+db.po.orders.K1.blNo = 'BL-1';
+db.parties = [{ id: 'c1', kind: 'clearer', name: 'مخلّص', statusMap: [{ text: 'تم الربط مع الوكيل', stage: 'customs' }, { text: 'وصلت الميناء', stage: 'port' }] }];
+const tk = I.applyTrack(db, [
+  { blNo: 'BL-1', containerNo: 'msku1', status: 'وصلت الميناء', statusDate: '2026-09-01', portDate: '2026-09-01' },
+  { blNo: 'BL-1', containerNo: 'MSKU2', status: 'تم الربط مع الوكيل', statusDate: '2026-09-03' },
+  { poNo: 'NOPE', status: 'x' }, { blNo: 'BL-1', status: 'حالة جديدة' }
+], { date: '2026-09-03', partyId: 'c1' });
+assert.deepStrictEqual(tk.matched, ['K1']); assert.deepStrictEqual(tk.notFound, ['NOPE']); assert.strictEqual(tk.unmapped['حالة جديدة'], 1);
+assert.strictEqual(tk.containersAdded, 2); assert.strictEqual(db.po.orders.K1.track.stage, 'customs'); assert.strictEqual(db.po.orders.K1.track.clearer, 'c1');
+assert.ok(db.po.orders.K1.shipped, 'reaching port implies shipped');
+// تسليم كل الحاويات فارغة ← منتهية
+I.applyTrack(db, [{ containerNo: 'MSKU1', emptyDate: '2026-09-20' }, { containerNo: 'MSKU2', emptyDate: '2026-09-21' }], { date: '2026-09-21' });
+assert.strictEqual(db.po.orders.K1.track.stage, 'emptyReturned'); assert.ok(db.po.orders.K1.track.closed);
+
 console.log('✓ all engine unit tests passed');
