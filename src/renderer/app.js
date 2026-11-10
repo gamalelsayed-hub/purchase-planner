@@ -19,12 +19,29 @@
     ['users', 'إدارة المستخدمين والصلاحيات'],
     ['data_admin', 'إدارة البيانات: الإكسيل القديم، الاسترجاع، المسح، المجلد المشترك، الحذف']
   ];
+  // الأقسام (الشاشات) اللي تظهر للمستخدم
+  const SECTIONS = [
+    ['dashboard', 'لوحة الطلب'], ['cycle', 'دورة الشراء الشهري'], ['order', 'قائمة الطلب'], ['calc', 'الحساب التفصيلي'], ['checks', 'الفحوصات'],
+    ['items', 'الأصناف'], ['data', 'المبيعات والمخزون'], ['po', 'أوامر الشراء والكاش'], ['archive', 'الأرشيف'], ['settings', 'الإعدادات'], ['users', 'المستخدمين']
+  ];
+  // كل صلاحية تحتاج قسمها يكون ظاهر
+  const PERM_SECTIONS = { import_data: ['cycle', 'data'], items: ['items'], adjust: ['order'], approve: ['order', 'cycle'], po_import: ['po'], po_payments: ['po'], settings: ['settings'], users: ['users'], data_admin: ['settings'] };
   const ROLE_TEMPLATES = {
-    admin: { label: 'مدير', perms: PERMS.map(p => p[0]) },
-    purchasing: { label: 'مشتريات', perms: ['export', 'import_data', 'items', 'adjust', 'po_import'] },
-    ap: { label: 'محاسب موردين', perms: ['export', 'po_import', 'po_payments'] },
-    viewer: { label: 'مشاهد', perms: ['export'] }
+    admin: { label: 'مدير', perms: PERMS.map(p => p[0]), pages: SECTIONS.map(x => x[0]) },
+    purchasing: { label: 'مشتريات', perms: ['export', 'import_data', 'items', 'adjust', 'po_import'], pages: ['dashboard', 'cycle', 'order', 'calc', 'checks', 'items', 'data', 'po', 'archive'] },
+    ap: { label: 'محاسب موردين', perms: ['export', 'po_import', 'po_payments'], pages: ['po'] },
+    viewer: { label: 'مشاهد', perms: ['export'], pages: ['dashboard', 'order', 'po', 'archive'] }
   };
+  const withRequired = (pages, perms) => [...new Set(pages.concat(...perms.map(p => PERM_SECTIONS[p] || [])))];
+  // المستخدمين القدامى بدون أقسام محفوظة: قالبهم إذا تطابق، وإلا كل الأقسام ما عدا الإعدادات والمستخدمين + أقسام صلاحياتهم
+  function userPages(u) {
+    const perms = Array.isArray(u.perms) ? u.perms : ((ROLE_TEMPLATES[u.role] || ROLE_TEMPLATES.viewer).perms);
+    if (Array.isArray(u.pages)) return withRequired(u.pages, perms);
+    const t = ROLE_TEMPLATES[u.role];
+    if (t && t.perms.slice().sort().join(',') === perms.slice().sort().join(',')) return t.pages.slice();
+    return withRequired(SECTIONS.map(x => x[0]).filter(k => k !== 'settings' && k !== 'users'), perms);
+  }
+  const canSee = page => !!ui.user && (ui.user.pages || []).includes(page);
   const ROLES = Object.fromEntries(Object.entries(ROLE_TEMPLATES).map(([k, v]) => [k, v.label]));
   const userPerms = u => Array.isArray(u.perms) ? u.perms : ((ROLE_TEMPLATES[u.role] || ROLE_TEMPLATES.viewer).perms);
   function roleLabel(u) {
@@ -274,7 +291,7 @@
   ];
   function renderNav() {
     const auto = res ? res.rows.filter(r => r.autoAdded).length : 0;
-    $('#nav').innerHTML = NAV.filter(n => !n.admin || has('users')).map(n => {
+    $('#nav').innerHTML = NAV.filter(n => n.sep || canSee(n.id)).filter((n, i, a) => !(n.sep && (i === 0 || i === a.length - 1 || a[i - 1].sep))).map(n => {
       if (n.sep) return '<div class="nav-sep"></div>';
       let badge = '';
       if (n.id === 'checks' && res) badge = res.blocking ? `<span class="badge">${res.blocking}</span>` : (res.warnings ? `<span class="badge w">${res.warnings}</span>` : '');
@@ -299,10 +316,11 @@
     if (!ui.user) { document.body.classList.add('auth'); $('#main').innerHTML = pageAuth(); return; }
     document.body.classList.remove('auth');
     document.body.classList.toggle('ro', ui.readOnly);
+    if (!canSee(ui.page)) ui.page = (SECTIONS.find(x => canSee(x[0])) || ['dashboard'])[0];
     renderNav();
     const fn = PAGES[ui.page] || PAGES.dashboard;
     const banner = ui.readOnly ? `<div class="banner warn no-print"><span class="grow">${!canEditAnything(ui.user) ? '👁 وضع العرض فقط (صلاحياتك عرض وتصدير)' : `🔒 للعرض فقط — البيانات مفتوحة للتعديل عند <b>${esc((ui.lockHolder && (ui.lockHolder.name || ui.lockHolder.user)) || '—')}</b> على جهاز ${esc((ui.lockHolder && ui.lockHolder.machine) || '—')}. سيتحدث العرض تلقائيًا، وتحصل على التعديل أول ما يغلق البرنامج.`}</span>${canEditAnything(ui.user) ? '<button class="sm" data-act="tryLock">محاولة التعديل الآن</button>' : ''}</div>` : '';
-    $('#main').innerHTML = banner + (!db.items.length && !['settings', 'items', 'users'].includes(ui.page) ? pageWelcome() : fn());
+    $('#main').innerHTML = banner + (!(ui.user.pages || []).length ? '<div class="empty"><h2>لا توجد أقسام متاحة لك</h2>تواصل مع المدير لإضافة أقسام لحسابك.</div>' : !db.items.length && !['settings', 'items', 'users', 'po'].includes(ui.page) && (canSee('cycle') || canSee('items')) ? pageWelcome() : fn());
     const actions = $('#main .page-head .actions');
     const exp = EXPORTS[ui.page];
     if (exp && $('#main .page-head')) {
@@ -319,7 +337,10 @@
     if (sc2 && ui.keepScroll) sc2.scrollTop = scrollTop;
     ui.keepScroll = false;
   }
-  function go(page) { ui.page = page; $('#main').scrollTop = 0; render(); }
+  function go(page) {
+    if (ui.user && !canSee(page)) { toast('هذا القسم غير متاح لك', 'bad'); return; }
+    ui.page = page; $('#main').scrollTop = 0; render();
+  }
 
   // ================= المستخدمين والصلاحيات =================
   function hex(buf) { return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join(''); }
@@ -330,7 +351,7 @@
   }
   async function makeUser(username, name, role, pw) {
     const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
-    return { username: username.trim().toLowerCase(), name: name.trim() || username.trim(), role, perms: (ROLE_TEMPLATES[role] || ROLE_TEMPLATES.viewer).perms.slice(), salt, hash: await hashPw(pw, salt), active: true, createdAt: nowStamp() };
+    return { username: username.trim().toLowerCase(), name: name.trim() || username.trim(), role, perms: (ROLE_TEMPLATES[role] || ROLE_TEMPLATES.viewer).perms.slice(), pages: (ROLE_TEMPLATES[role] || ROLE_TEMPLATES.viewer).pages.slice(), salt, hash: await hashPw(pw, salt), active: true, createdAt: nowStamp() };
   }
   // التعديل يحتاج الصلاحية + قفل التعديل. العرض متاح للجميع.
   const has = perm => !!ui.user && userPerms(ui.user).includes(perm);
@@ -391,7 +412,8 @@
     await startSession(usr, false);
   }
   async function startSession(usr, created) {
-    ui.user = { username: usr.username, name: usr.name, role: usr.role, perms: userPerms(usr).slice() };
+    ui.user = { username: usr.username, name: usr.name, role: usr.role, perms: userPerms(usr).slice(), pages: userPages(usr) };
+    ui.page = (SECTIONS.find(x => canSee(x[0])) || ['dashboard'])[0];
     try { localStorage.setItem('pp_last_user', usr.username); } catch (e) { /* */ }
     ui.readOnly = true; ui.lockHolder = null;
     if (canEditAnything(usr)) await tryLock(true);
@@ -508,6 +530,7 @@
       <div class="actions"><button class="primary" data-act="addUser">إضافة مستخدم</button></div></div>
       ${table('users', [
         { k: 'username', h: 'اسم المستخدم' }, { k: 'name', h: 'الاسم' }, { k: 'role', h: 'الدور', v: u => roleLabel(u) },
+        { k: 'pages', h: 'الأقسام', cls: 'wrap', v: u => userPages(u).map(p => (SECTIONS.find(x => x[0] === p) || [p, p])[1]).join('، ') },
         { k: 'perms', h: 'الصلاحيات', cls: 'wrap', v: u => userPerms(u).map(p => (PERMS.find(x => x[0] === p) || [p, p])[1]).join('، ') },
         { k: 'active', h: 'الحالة', v: u => u.active !== false ? 'نشط' : 'موقوف' }, { k: 'createdAt', h: 'تاريخ الإنشاء', v: u => (u.createdAt || '').slice(0, 10) },
         { k: 'act', h: '', nosort: true, f: u => `<button class="sm" data-act="editUser" data-k="${esc(u.username)}">تعديل</button>` }
@@ -519,6 +542,7 @@
   function userModal(username) {
     const u = username ? db.users.find(x => x.username === username) : null;
     const cur = u ? userPerms(u) : ROLE_TEMPLATES.purchasing.perms;
+    const curPages = u ? userPages(u) : ROLE_TEMPLATES.purchasing.pages;
     modal({
       title: u ? 'تعديل مستخدم ' + esc(u.username) : 'إضافة مستخدم',
       body: `<div class="form f2">
@@ -528,22 +552,28 @@
         <label class="f">قالب صلاحيات (يعبّي الخانات تحت)<select id="u_tpl"><option value="">— اختر قالب —</option>${Object.entries(ROLE_TEMPLATES).map(([k, t]) => `<option value="${k}">${t.label}</option>`).join('')}</select></label>
         ${u ? `<label class="chk full"><input type="checkbox" id="u_active" ${u.active !== false ? 'checked' : ''}> المستخدم نشط (إلغاء التحديد يمنعه من الدخول)</label>` : ''}
       </div>
-      <h3>الصلاحيات <span class="small">(العرض متاح للجميع)</span></h3>
+      <h3>الأقسام اللي تظهر له <span class="small">(اللي مو معلّم ما يشوفه أبدًا)</span></h3>
+      <div class="perm-grid sec-grid">${SECTIONS.map(([k, l]) => `<label class="chk"><input type="checkbox" data-page="${k}" ${curPages.includes(k) ? 'checked' : ''}> ${l}</label>`).join('')}</div>
+      <h3>الصلاحيات <span class="small">(وش يقدر يعدّل داخل أقسامه — كل صلاحية تعلّم قسمها تلقائيًا)</span></h3>
       <div class="perm-grid">${PERMS.map(([k, l]) => `<label class="chk"><input type="checkbox" data-perm="${k}" ${cur.includes(k) ? 'checked' : ''}> ${l}</label>`).join('')}</div>
       <div class="small" id="u_rolelbl" style="margin-top:8px"></div>`,
       foot: `<button class="primary" data-ok>حفظ</button><button data-close>إلغاء</button>`,
       onMount: m => {
         const perms = () => [...m.qa('[data-perm]')].filter(x => x.checked).map(x => x.dataset.perm);
+        const pages = () => [...m.qa('[data-page]')].filter(x => x.checked).map(x => x.dataset.page);
+        // الصلاحية تعلّم قسمها، والقسم المطلوب لصلاحية معلّمة ما ينشال
+        const syncPages = () => { const need = new Set(perms().flatMap(p => PERM_SECTIONS[p] || [])); m.qa('[data-page]').forEach(x => { if (need.has(x.dataset.page)) x.checked = true; x.disabled = need.has(x.dataset.page); x.closest('label').title = x.disabled ? 'مطلوب لصلاحية معلّمة' : ''; }); };
         // القائمة تعكس الخانات دائمًا: اسم القالب المطابق، أو «— اختر قالب —» إذا الخانات مخصصة
         const lbl = () => {
           const ps = perms().slice().sort().join(',');
           const match = Object.entries(ROLE_TEMPLATES).find(([, t]) => t.perms.slice().sort().join(',') === ps);
           m.q('#u_tpl').value = match ? match[0] : '';
-          m.q('#u_rolelbl').innerHTML = 'الدور: <b>' + roleLabel({ perms: perms() }) + '</b> — الخانات المعلّمة هي اللي تنحفظ (' + perms().length + ' صلاحية)';
+          m.q('#u_rolelbl').innerHTML = 'الدور: <b>' + roleLabel({ perms: perms() }) + '</b> — الخانات المعلّمة هي اللي تنحفظ (' + pages().length + ' قسم، ' + perms().length + ' صلاحية)';
         };
+        syncPages();
         lbl();
-        m.q('.modal-body').addEventListener('change', e => { if (e.target.dataset.perm) lbl(); });
-        m.q('#u_tpl').onchange = e => { const t = ROLE_TEMPLATES[e.target.value]; if (!t) return; m.qa('[data-perm]').forEach(x => { x.checked = t.perms.includes(x.dataset.perm); }); lbl(); };
+        m.q('.modal-body').addEventListener('change', e => { if (e.target.dataset.perm) { syncPages(); lbl(); } else if (e.target.dataset.page) lbl(); });
+        m.q('#u_tpl').onchange = e => { const t = ROLE_TEMPLATES[e.target.value]; if (!t) return; m.qa('[data-perm]').forEach(x => { x.checked = t.perms.includes(x.dataset.perm); }); m.qa('[data-page]').forEach(x => { x.checked = t.pages.includes(x.dataset.page); }); syncPages(); lbl(); };
         m.q('[data-ok]').onclick = async () => {
           const pw = m.q('#u_pw').value, name = m.q('#u_name').value.trim(), ps = perms();
           const role = (Object.entries(ROLE_TEMPLATES).find(([, t]) => t.perms.slice().sort().join(',') === ps.slice().sort().join(',')) || ['custom'])[0];
@@ -551,9 +581,9 @@
           if (u) {
             const act = m.q('#u_active').checked;
             if (!others.length && (!act || !ps.includes('users'))) return toast('لازم يبقى مستخدم نشط واحد على الأقل عنده صلاحية «إدارة المستخدمين»', 'bad');
-            u.role = role; u.perms = ps; u.name = name || u.username; u.active = act;
+            u.role = role; u.perms = ps; u.pages = withRequired(pages(), ps); u.name = name || u.username; u.active = act;
             if (pw) { if (pw.length < 4) return toast('كلمة المرور قصيرة', 'bad'); u.salt = hex(crypto.getRandomValues(new Uint8Array(16))); u.hash = await hashPw(pw, u.salt); }
-            if (u.username === ui.user.username) ui.user.perms = ps.slice();
+            if (u.username === ui.user.username) { ui.user.perms = ps.slice(); ui.user.pages = u.pages.slice(); }
             log('تعديل المستخدم ' + u.username + ' (' + roleLabel(u) + ')');
           } else {
             const un = m.q('#u_user').value.trim().toLowerCase();
@@ -561,7 +591,7 @@
             if (db.users.some(x => x.username === un)) return toast('اسم المستخدم موجود', 'bad');
             if (pw.length < 4) return toast('كلمة المرور قصيرة (4 أحرف على الأقل)', 'bad');
             const nu = await makeUser(un, name, role === 'custom' ? 'viewer' : role, pw);
-            nu.role = role; nu.perms = ps;
+            nu.role = role; nu.perms = ps; nu.pages = withRequired(pages(), ps);
             db.users.push(nu);
             log('إضافة المستخدم ' + un + ' (' + roleLabel(nu) + ')');
           }
