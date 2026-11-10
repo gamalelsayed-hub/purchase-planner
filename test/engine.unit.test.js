@@ -129,6 +129,12 @@ assert.strictEqual(E.stageOf(db.po.orders.P1), 'shipped'); assert.strictEqual(E.
 I.applyPOPay(db, [{ poNo: 'P2', status: 'لم يتم السداد', shipDate: '2026-08-01', blNo: 'BL-77' }], { date: '2026-08-02' });
 const p2 = E.poSummary(db, '2026-08-02').find(o => o.no === 'P2');
 assert.strictEqual(p2.stage, 'shipped'); assert.strictEqual(p2.blNo, 'BL-77'); assert.strictEqual(p2.eta, '2026-08-31', 'ship date + 30 days');
+// تاريخ الأمر من الشيت: الأمر الصادر يحسب وصوله من تاريخ الأمر + فترة التوصيل
+db.po.orders.P2.shipped = false; db.po.orders.P2.shipDate = ''; db.po.orders.P2.shippedAt = '';
+I.applyPOPay(db, [{ poNo: 'P2', poDate: '2026-05-01' }], { date: '2026-08-03' });
+assert.strictEqual(db.po.orders.P2.poDate, '2026-05-01');
+db.po.orders.P2.shipped = false; db.po.orders.P2.shippedAt = '';
+assert.strictEqual(E.poAutoEta(db, db.po.orders.P2), '2026-06-01', 'issued: PO date + 1 month (مصنع)');
 // تكاليف إضافية بعملة مختلفة تدخل الإجمالي والمتبقي
 db.po.orders.P1.extraCosts = [{ id: 'x1', desc: 'جمارك', amount: 375, currency: 'SAR' }];
 const p1b = E.poSummary(db, '2026-07-21').find(o => o.no === 'P1');

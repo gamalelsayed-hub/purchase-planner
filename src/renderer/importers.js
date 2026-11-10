@@ -79,6 +79,7 @@
       title: 'شحن وسداد أوامر الشراء',
       fields: [
         { key: 'poNo', label: 'رقم الأمر', aliases: ['رقم الأمر', 'رقم الامر', 'رقم امر الشراء', 'امر الشراء', 'po'], required: true },
+        { key: 'poDate', label: 'تاريخ الأمر', aliases: ['تاريخ الأمر', 'تاريخ الامر', 'تاريخ امر الشراء', 'تاريخ إصدار الأمر', 'podate'] },
         { key: 'value', label: 'قيمة الأمر', aliases: ['القيمة دولار', 'قيمة الأمر', 'قيمة الامر', 'القيمة', 'value'] },
         { key: 'shipping', label: 'رسوم الشحن', aliases: ['رسوم الشحن دولار', 'رسوم الشحن', 'الشحن', 'shipping'] },
         { key: 'currency', label: 'العملة', aliases: ['العملة', 'currency'] },
@@ -367,6 +368,7 @@
       // وجود الأمر في شيت المحاسب = صدرت له بوليصة شحن ← «تم الشحن»
       if (!o.shipped) { o.shipped = true; o.shippedAt = day; o.shippedBy = 'sheet'; res.shipped.push(r.poNo); }
       if (has(r, 'blNo')) o.blNo = String(r.blNo).trim();
+      const pdt = toDate(r.poDate); if (pdt) o.poDate = pdt;
       const sd = toDate(r.shipDate); if (sd) o.shipDate = sd;
       o.payments = (o.payments || []).filter(p => p.source !== 'sheet');
       const st = String(r.status || '').trim();

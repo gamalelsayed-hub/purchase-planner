@@ -1155,7 +1155,7 @@
       { k: 'no', h: 'رقم الأمر', f: o => `<b>${esc(o.no)}</b>${o.flags.includes('stillInReport') ? ' <span class="pill warn" title="علّمته واصل لكنه ما زال في تقرير النظام">لا يزال في التقرير</span>' : ''}` },
       { k: 'act', h: '', nosort: true, f: o => `${o.stage === 'issued' ? `<button class="sm" data-act="poQuickShip" data-k="${esc(o.no)}" title="صدرت بوليصة شحن">شحن</button> ` : ''}${o.status === 'open' ? `<button class="sm ok" data-act="poQuickRecv" data-k="${esc(o.no)}" title="تعليم الأمر وصل المخزون">وصل</button> ` : ''}${o.dueSar > 0.5 ? `<button class="sm" data-act="poQuickPay" data-k="${esc(o.no)}" title="تسجيل دفعة">سداد</button>` : ''}` },
       { k: 'stage', h: 'الحالة', v: o => o.stageLabel, f: o => stagePill(o) },
-      { k: 'blNo', h: 'البوليصة' }, { k: 'shipDate', h: 'تاريخ الشحن' }, { k: 'attachments', h: '📎', n: true, f: o => o.attachments ? '📎 ' + o.attachments : '' },
+      { k: 'poDate', h: 'تاريخ الأمر' }, { k: 'blNo', h: 'البوليصة' }, { k: 'shipDate', h: 'تاريخ الشحن' }, { k: 'attachments', h: '📎', n: true, f: o => o.attachments ? '📎 ' + o.attachments : '' },
       { k: 'lines', h: 'أصناف', n: true }, { k: 'supplier', h: 'المورد' }, { k: 'agent', h: 'المخلّص' },
       { k: 'currency', h: 'العملة', v: o => curName(o.currency) },
       { k: 'value', h: 'القيمة', n: true, d: 2 }, { k: 'shipping', h: 'الشحن', n: true, d: 2 }, { k: 'extrasSar', h: 'تكاليف إضافية ' + cur(), n: true },
@@ -1250,6 +1250,7 @@
         <label class="f">سعر صرف خاص (فارغ = من الإعدادات)<input id="o_rate" type="number" step="any" value="${o.rate || ''}" ${dis(canPay)}></label>
         <label class="f">رسوم الشحن (بعملة الأمر)<input id="o_ship" type="number" step="any" value="${o.shipping || ''}" ${dis(canPay)}></label>
         ${(o.lines || []).length ? '' : `<label class="f">قيمة الأمر (بدون أصناف)<input id="o_val" type="number" step="any" value="${o.manualValue || ''}" ${dis(canPay)}></label>`}
+        <label class="f">تاريخ الأمر<input id="o_pd" type="date" value="${esc(o.poDate || '')}" ${dis(canSt || canPay)}></label>
         <label class="f">رقم بوليصة الشحن<input id="o_bl" value="${esc(o.blNo || '')}" ${dis(canSt)}></label>
         <label class="f">تاريخ الشحن<input id="o_sd" type="date" value="${esc(o.shipDate || '')}" ${dis(canSt)}></label>
         <label class="f">الوصول المتوقع — فارغ = تلقائي (${esc(auto || '—')})<input id="o_eta" type="date" value="${esc(o.etaManual ? o.eta : '')}" ${dis(canSt)}></label>
@@ -1305,7 +1306,7 @@
             o.blNo = m.q('#o_bl').value.trim(); o.shipDate = m.q('#o_sd').value;
             if ((o.blNo || o.shipDate) && !o.shipped && o.status === 'open') { o.shipped = true; o.shippedAt = o.shipDate || today(); o.shippedBy = 'manual'; }
           }
-          if (canPay || canSt) o.note = m.q('#o_note').value.trim();
+          if (canPay || canSt) { o.note = m.q('#o_note').value.trim(); o.poDate = m.q('#o_pd').value; }
         };
         m.q('[data-save]').onclick = () => { save(); log('تعديل أمر الشراء ' + no); m.close(); commit(); toast('تم الحفظ', 'ok'); };
         const reopenModal = () => { m.close(); commit(); poModal(no); };
