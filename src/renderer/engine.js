@@ -152,9 +152,9 @@
       version: 1,
       settings: defaultSettings(),
       types: [
-        { name: 'خارجي', leadTime: 3, extraMonths: 3, note: 'استيراد', currency: 'USD' },
-        { name: 'محلي', leadTime: 1, extraMonths: 0, note: '', currency: 'SAR' },
-        { name: 'مصنع', leadTime: 1, extraMonths: 0, note: '', currency: 'SAR' }
+        { name: 'خارجي', leadTime: 3, extraMonths: 3, note: 'استيراد', currency: 'USD', prepDays: 60 },
+        { name: 'محلي', leadTime: 1, extraMonths: 0, note: '', currency: 'SAR', prepDays: 0 },
+        { name: 'مصنع', leadTime: 1, extraMonths: 0, note: '', currency: 'SAR', prepDays: 0 }
       ],
       currencies: [{ code: 'SAR', name: 'ريال', rate: 1 }, { code: 'USD', name: 'دولار', rate: 3.75 }],
       po: { orders: {}, imports: [] },
@@ -384,6 +384,7 @@
       { id: 'stockDup', title: 'أصناف مكررة في تقرير المخزون', count: [...stockDup.values()].filter(v => v > 1).length, sev: 'w', where: 'المخزون', why: 'تُجمع كمياتها — تأكد أنها ليست لصقًا مكررًا' },
       { id: 'transitDup', title: 'أصناف بالطريق من أكثر من سطر/مصدر', count: [...transitDup.values()].filter(v => v > 1).length, sev: 'w', where: 'بالطريق', why: 'تتجمع — تأكد أنها أوامر مختلفة' },
       { id: 'transitBoth', title: 'أصناف بالطريق من أمر شراء ومن إدخال يدوي معًا', count: count(r => r.transitPo > 0 && r.transitManual > 0), sev: 'w', where: 'المبيعات والمخزون ← بالطريق', why: 'تأكد أن السطر اليدوي ليس نفس أمر الشراء (يُخصم مرتين)' },
+      { id: 'poShipLate', title: 'أوامر صادرة تأخر شحنها (عدّت مدة التجهيز بدون بوليصة)', count: poSummary(db).filter(o => o.shipLate).length, sev: 'w', where: 'أوامر الشراء ← فلتر «تأخر الشحن»', why: 'تابع مع المورد، أو علّمه «تم الشحن» إذا صدرت البوليصة' },
       { id: 'poOverdue', title: 'أوامر شراء مفتوحة تجاوزت تاريخ الوصول المتوقع', count: poSummary(db).filter(o => o.status === 'open' && o.daysToEta != null && o.daysToEta < 0).length, sev: 'w', where: 'أوامر الشراء', why: 'حدّث التاريخ المتوقع أو علّمه «وصل المخزون»' },
       { id: 'negSales', title: 'أسطر مبيعات صافيها سالب (مرتجع أكبر من المنصرف)', count: negSalesRows, sev: 'w', where: 'المبيعات', why: 'تقلل المتوسط — تأكد أنها صحيحة' },
       { id: 'adjNoReason', title: 'تعديلات يدوية بدون سبب', count: count(r => r.delta !== 0 && !String(r.reason).trim()), sev: 'x', where: 'قائمة الطلب ← تعديل', why: 'كل تعديل على السياسة لازم يكون له سبب' },
@@ -464,8 +465,25 @@
     return d.toISOString().slice(0, 10);
   }
   // الوصول التلقائي: المشحون = تاريخ الشحن + مدة الشحن ، الصادر = أول ظهور (أو تاريخ الأمر) + فترة التوصيل
+  // مدة التجهيز من تاريخ الأمر حتى الشحن (يوم) = أطول مدة لأنواع أصناف الأمر. صفر = النوع بدون مرحلة شحن.
+  function poPrepDays(db, o) {
+    const items = new Map((db.items || []).map(it => [it.code, it]));
+    const types = new Map((db.types || []).map(t => [t.name, t]));
+    let d = 0, found = false;
+    for (const l of o.lines || []) { const it = items.get(l.code); const t = it && types.get(it.type); if (t) { found = true; d = Math.max(d, num(t.prepDays)); } }
+    if (!found) for (const t of db.types || []) if (!o.currency || (t.currency || 'SAR') === o.currency) d = Math.max(d, num(t.prepDays));
+    return d;
+  }
+  // تاريخ الشحن المتوقع للأمر الصادر (فارغ إذا النوع بدون مرحلة شحن)
+  function poExpectedShip(db, o) {
+    const d = poPrepDays(db, o);
+    return d > 0 ? addDaysDate(o.poDate || o.firstSeen, d) : '';
+  }
   function poAutoEta(db, o) {
-    if (o.shipped && (o.shipDate || o.shippedAt)) return addDaysDate(o.shipDate || o.shippedAt, num((db.settings || {}).shipTransitDays) || 30);
+    const transit = num((db.settings || {}).shipTransitDays) || 30;
+    if (o.shipped && (o.shipDate || o.shippedAt)) return addDaysDate(o.shipDate || o.shippedAt, transit);
+    const exp = poExpectedShip(db, o);
+    if (exp) return addDaysDate(exp, transit);
     return addMonthsDate(o.poDate || o.firstSeen, poLead(db, o));
   }
   const stageOf = o => o.status === 'received' ? 'received' : o.shipped ? 'shipped' : 'issued';
@@ -488,19 +506,21 @@
       const paidSar = (o.payments || []).reduce((a, p) => a + num(p.amount) * (num(p.rate) > 0 ? num(p.rate) : fxRate(db, p.currency || o.currency)), 0);
       const dueSar = Math.max(0, totalSar - paidSar);
       const eta = o.etaManual && o.eta ? o.eta : poAutoEta(db, o);
+      const expShip = o.status === 'open' && !o.shipped ? poExpectedShip(db, o) : '';
+      const shipLateDays = expShip ? Math.round((new Date(today + 'T00:00:00Z') - new Date(expShip + 'T00:00:00Z')) / 86400000) : 0;
       const daysToEta = eta ? Math.round((new Date(eta + 'T00:00:00Z') - new Date(today + 'T00:00:00Z')) / 86400000) : null;
       const payStatus = totalSar <= 0 ? 'غير محدد' : paidSar <= 0.005 ? 'غير مسدد' : paidSar + 0.5 >= totalSar ? 'مسدد' : 'مسدد جزئيًا';
       return {
         no, status: o.status, stage: stageOf(o), stageLabel: STAGE_LABEL[stageOf(o)], blNo: o.blNo || '', shipDate: o.shipDate || o.shippedAt || '', attachments: (o.attachments || []).length, currency: o.currency || 'SAR', rate, value, shipping, extras, extrasSar, total, totalSar, paidSar, dueSar, payStatus,
         remainingValue, lines: (o.lines || []).length, eta, etaManual: !!o.etaManual, daysToEta, agent: o.agent || '', supplier: o.supplier || '',
         firstSeen: o.firstSeen || '', lastSeen: o.lastSeen || '', receivedAt: o.receivedAt || '', receivedBy: o.receivedBy || '', note: o.note || '', poDate: o.poDate || '',
-        payments: (o.payments || []).length, flags: o.flags || []
+        payments: (o.payments || []).length, flags: o.flags || [], expShip, shipLate: shipLateDays > 0, shipLateDays: Math.max(0, shipLateDays)
       };
     });
   }
 
   const Engine = {
-    compute, openPoLines, poSummary, poAutoEta, addDaysDate, stageOf, STAGE_LABEL, poLead, addMonthsDate, fxRate, normsinv, normUnit, normCode, num, toMonth, monthAdd, monthLabel,
+    compute, openPoLines, poSummary, poAutoEta, poPrepDays, poExpectedShip, addDaysDate, stageOf, STAGE_LABEL, poLead, addMonthsDate, fxRate, normsinv, normUnit, normCode, num, toMonth, monthAdd, monthLabel,
     unitFactor, purchaseFactor, allUnits, emptyDb, defaultSettings, defaultClasses, abc, roundUp, exceptionApplies
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Engine;

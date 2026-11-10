@@ -417,7 +417,7 @@
     const types = [];
     for (let r = 6; r <= 10; r++) {
       const name = cell(r, 6);
-      if (name) types.push({ name: String(name).trim(), leadTime: num(cell(r, 7)), extraMonths: num(cell(r, 8)), note: cell(r, 9) ? String(cell(r, 9)) : '', currency: /خارج|استيراد/.test(String(name) + (cell(r, 9) || '')) ? 'USD' : 'SAR' });
+      if (name) types.push({ name: String(name).trim(), leadTime: num(cell(r, 7)), extraMonths: num(cell(r, 8)), note: cell(r, 9) ? String(cell(r, 9)) : '', currency: /خارج|استيراد/.test(String(name) + (cell(r, 9) || '')) ? 'USD' : 'SAR', prepDays: /خارج|استيراد/.test(String(name) + (cell(r, 9) || '')) ? Math.max(0, Math.round(num(cell(r, 7)) * 30) - 30) : 0 });
     }
     if (types.length) db.types = types;
     const classes = [];

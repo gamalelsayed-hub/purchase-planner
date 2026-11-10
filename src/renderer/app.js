@@ -163,7 +163,11 @@
     if (!Array.isArray(d.currencies) || !d.currencies.length) d.currencies = base.currencies;
     if (!d.po || typeof d.po !== 'object') d.po = base.po;
     if (!d.po.orders) d.po.orders = {}; if (!Array.isArray(d.po.imports)) d.po.imports = [];
-    for (const t of d.types) if (!t.currency) t.currency = /خارج|استيراد/.test(t.name + (t.note || '')) ? 'USD' : 'SAR';
+    for (const t of d.types) {
+      if (!t.currency) t.currency = /خارج|استيراد/.test(t.name + (t.note || '')) ? 'USD' : 'SAR';
+      // مدة التجهيز حتى الشحن: للأنواع بالعملة الأجنبية = فترة التوصيل − مدة الشحن (حتى ما تتغير التواريخ الحالية)
+      if (t.prepDays == null) t.prepDays = t.currency !== 'SAR' ? Math.max(0, Math.round(num(t.leadTime) * 30) - (num(d.settings.shipTransitDays) || 30)) : 0;
+    }
     for (const it of d.items) { if (!Array.isArray(it.units)) it.units = []; }
     return d;
   }
@@ -847,7 +851,7 @@
 
   // ---------- الفحوصات ----------
   PAGES.checks = function () {
-    const links = { salesUnit: 'units', stockUnit: 'units', transitUnit: 'units', autoAdded: 'auto', noCost: 'noCost', adjNoReason: 'adj', inactiveAdj: 'adj', months: 'cycle', unknownType: 'unknownType', negStock: 'negStock', poOverdue: 'po', transitBoth: 'units_transit' };
+    const links = { salesUnit: 'units', stockUnit: 'units', transitUnit: 'units', autoAdded: 'auto', noCost: 'noCost', adjNoReason: 'adj', inactiveAdj: 'adj', months: 'cycle', unknownType: 'unknownType', negStock: 'negStock', poOverdue: 'po', poShipLate: 'poLate', transitBoth: 'units_transit' };
     return `
     <div class="page-head"><div><h1>فحوصات جودة البيانات</h1><div class="sub">راجعها قبل اعتماد الطلب. ✗ = يجب التصحيح، ⚠ = تنبيه للمراجعة.</div></div></div>
     ${res.blocking ? `<div class="banner bad">✗ يوجد ${res.blocking} فحص غير سليم</div>` : '<div class="banner ok">✓ كل الفحوصات الأساسية سليمة</div>'}
@@ -1105,11 +1109,12 @@
   function poRows() {
     const f = ui.f.po, q = f.q.trim().toLowerCase();
     return E.poSummary(db, today()).filter(o =>
-      (f.status === 'الكل' || (f.status === 'open' ? o.status === 'open' : o.stage === f.status)) && (f.pay === 'الكل' || o.payStatus === f.pay) && (f.agent === 'الكل' || o.agent === f.agent) &&
+      (f.status === 'الكل' || (f.status === 'open' ? o.status === 'open' : f.status === 'late' ? o.shipLate : o.stage === f.status)) && (f.pay === 'الكل' || o.payStatus === f.pay) && (f.agent === 'الكل' || o.agent === f.agent) &&
       (!q || o.no.toLowerCase().includes(q) || o.agent.toLowerCase().includes(q) || o.supplier.toLowerCase().includes(q) || o.note.toLowerCase().includes(q) ||
         (db.po.orders[o.no].lines || []).some(l => l.code.toLowerCase().includes(q) || String(l.name).toLowerCase().includes(q))));
   }
-  const stagePill = o => o.stage === 'received' ? `<span class="pill ok" title="${esc(o.receivedAt)} ${o.receivedBy === 'auto' ? '(تلقائي)' : '(يدوي)'}">وصل ${esc(o.receivedAt)}</span>` : o.stage === 'shipped' ? `<span class="pill warn" title="${esc(o.blNo ? 'بوليصة ' + o.blNo : '')}">🚢 تم الشحن</span>` : '<span class="pill brand">صادر</span>';
+  const stagePill = o => (o.shipLate ? `<span class="pill bad" title="الشحن المتوقع ${esc(o.expShip)}">⚠ تأخر الشحن</span> ` : '') + stageCore(o);
+  const stageCore = o => o.stage === 'received' ? `<span class="pill ok" title="${esc(o.receivedAt)} ${o.receivedBy === 'auto' ? '(تلقائي)' : '(يدوي)'}">وصل ${esc(o.receivedAt)}</span>` : o.stage === 'shipped' ? `<span class="pill warn" title="${esc(o.blNo ? 'بوليصة ' + o.blNo : '')}">🚢 تم الشحن</span>` : '<span class="pill brand">صادر</span>';
   const payPill = s => `<span class="pill ${s === 'مسدد' ? 'ok' : s === 'مسدد جزئيًا' ? 'warn' : s === 'غير مسدد' ? 'bad' : ''}">${s}</span>`;
   const etaCell = o => !o.eta ? '<span class="muted">—</span>' : `${esc(o.eta)}${o.etaManual ? ' ✎' : ''}${o.status === 'open' && o.daysToEta != null ? ` <span class="pill ${o.daysToEta < 0 ? 'bad' : o.daysToEta <= 30 ? 'warn' : ''}">${o.daysToEta < 0 ? 'متأخر ' + (-o.daysToEta) + ' يوم' : 'بعد ' + o.daysToEta + ' يوم'}</span>` : ''}`;
   function cashBanner() {
@@ -1145,7 +1150,7 @@
     const agents = [...new Set(E.poSummary(db).map(o => o.agent).filter(Boolean))];
     const sum = k => rows.reduce((a, o) => a + o[k], 0);
     return `<div class="toolbar">
-      <label class="chk">الحالة <select class="inp" data-chg="filter" data-f="po.status">${[['open', 'مفتوح (صادر + تم الشحن)'], ['issued', 'صادر (لم يُشحن)'], ['shipped', 'تم الشحن'], ['received', 'وصل المخزون'], ['الكل', 'الكل']].map(([k, l]) => `<option value="${k}" ${f.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label class="chk">الحالة <select class="inp" data-chg="filter" data-f="po.status">${[['open', 'مفتوح (صادر + تم الشحن)'], ['issued', 'صادر (لم يُشحن)'], ['late', '⚠ تأخر الشحن'], ['shipped', 'تم الشحن'], ['received', 'وصل المخزون'], ['الكل', 'الكل']].map(([k, l]) => `<option value="${k}" ${f.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label class="chk">السداد <select class="inp" data-chg="filter" data-f="po.pay">${opts(['غير مسدد', 'مسدد جزئيًا', 'مسدد', 'غير محدد'], f.pay, true)}</select></label>
       <label class="chk">المخلّص <select class="inp" data-chg="filter" data-f="po.agent">${opts(agents, f.agent, true)}</select></label>
       <input type="search" id="qPo" placeholder="بحث برقم الأمر أو الصنف…" value="${esc(f.q)}" data-search="po.q">
@@ -1155,7 +1160,7 @@
       { k: 'no', h: 'رقم الأمر', f: o => `<b>${esc(o.no)}</b>${o.flags.includes('stillInReport') ? ' <span class="pill warn" title="علّمته واصل لكنه ما زال في تقرير النظام">لا يزال في التقرير</span>' : ''}` },
       { k: 'act', h: '', nosort: true, f: o => `${o.stage === 'issued' ? `<button class="sm" data-act="poQuickShip" data-k="${esc(o.no)}" title="صدرت بوليصة شحن">شحن</button> ` : ''}${o.status === 'open' ? `<button class="sm ok" data-act="poQuickRecv" data-k="${esc(o.no)}" title="تعليم الأمر وصل المخزون">وصل</button> ` : ''}${o.dueSar > 0.5 ? `<button class="sm" data-act="poQuickPay" data-k="${esc(o.no)}" title="تسجيل دفعة">سداد</button>` : ''}` },
       { k: 'stage', h: 'الحالة', v: o => o.stageLabel, f: o => stagePill(o) },
-      { k: 'poDate', h: 'تاريخ الأمر' }, { k: 'blNo', h: 'البوليصة' }, { k: 'shipDate', h: 'تاريخ الشحن' }, { k: 'attachments', h: '📎', n: true, f: o => o.attachments ? '📎 ' + o.attachments : '' },
+      { k: 'poDate', h: 'تاريخ الأمر' }, { k: 'expShip', h: 'الشحن المتوقع', f: o => o.expShip ? `${esc(o.expShip)}${o.shipLate ? ` <span class="pill bad">تأخر ${o.shipLateDays} يوم</span>` : ''}` : '' }, { k: 'blNo', h: 'البوليصة' }, { k: 'shipDate', h: 'تاريخ الشحن' }, { k: 'attachments', h: '📎', n: true, f: o => o.attachments ? '📎 ' + o.attachments : '' },
       { k: 'lines', h: 'أصناف', n: true }, { k: 'supplier', h: 'المورد' }, { k: 'agent', h: 'المخلّص' },
       { k: 'currency', h: 'العملة', v: o => curName(o.currency) },
       { k: 'value', h: 'القيمة', n: true, d: 2 }, { k: 'shipping', h: 'الشحن', n: true, d: 2 }, { k: 'extrasSar', h: 'تكاليف إضافية ' + cur(), n: true },
@@ -1223,7 +1228,7 @@
     const auto = E.poAutoEta(db, o);
     modal({
       title: `أمر الشراء ${esc(no)}`, size: 'wide',
-      body: `<div class="row-flex" style="margin-bottom:12px">${stagePill(sm)}${o.status === 'received' ? `<span class="small">${o.receivedBy === 'auto' ? 'تلقائي: ' + esc(o.receivedNote || '') : 'يدوي'}</span>` : ''}${payPill(sm.payStatus)}<span class="small">أول ظهور ${esc(o.firstSeen || '—')} — آخر تحديث ${esc(o.lastSeen || '—')}</span></div>
+      body: `<div class="row-flex" style="margin-bottom:12px">${stagePill(sm)}${o.status === 'received' ? `<span class="small">${o.receivedBy === 'auto' ? 'تلقائي: ' + esc(o.receivedNote || '') : 'يدوي'}</span>` : ''}${payPill(sm.payStatus)}${sm.expShip ? `<span class="small">الشحن المتوقع ${esc(sm.expShip)} (تاريخ الأمر + ${fmt(E.poPrepDays(db, o))} يوم)</span>` : ''}<span class="small">أول ظهور ${esc(o.firstSeen || '—')} — آخر تحديث ${esc(o.lastSeen || '—')}</span></div>
       <div class="calc-grid">
         <div class="c"><div class="l">الإجمالي (قيمة + شحن + تكاليف إضافية)</div><div class="v">${fmt(sm.total, 2)} ${esc(curName(sm.currency))}</div></div>
         <div class="c"><div class="l">بالعملة الأساسية</div><div class="v">${money(sm.totalSar)} ${cur()}</div></div>
@@ -1387,11 +1392,12 @@
 
     <div class="card"><h2>أنواع الأصناف — فترة التوصيل والفترة الإضافية</h2>
       <div class="hint">«الفترة الإضافية» = أشهر مخزون فوق السياسة بقرار الإدارة، ثابتة لين تغيّرها. يمكن تحديد قيمة خاصة لصنف من شاشة الصنف.</div>
-      <div style="overflow:auto"><table class="t" style="margin-top:8px"><thead><tr><th>النوع</th><th>فترة التوصيل (شهر)</th><th>أشهر إضافية</th><th>عملة الشراء</th><th>ملاحظة</th><th>أصناف</th><th></th></tr></thead><tbody>
+      <div style="overflow:auto"><table class="t" style="margin-top:8px"><thead><tr><th>النوع</th><th>فترة التوصيل (شهر)</th><th>أشهر إضافية</th><th>عملة الشراء</th><th title="من تاريخ الأمر حتى صدور البوليصة — صفر = بدون مرحلة شحن">التجهيز حتى الشحن (يوم)</th><th>ملاحظة</th><th>أصناف</th><th></th></tr></thead><tbody>
       ${db.types.map((t, i) => `<tr><td><input class="inp" style="width:100px" data-chg="type" data-i="${i}" data-k="name" value="${esc(t.name)}"></td>
         <td><input class="inp" style="width:80px" type="number" step="any" min="0" data-chg="type" data-i="${i}" data-k="leadTime" value="${t.leadTime}"></td>
         <td><input class="inp" style="width:80px" type="number" step="any" min="0" data-chg="type" data-i="${i}" data-k="extraMonths" value="${t.extraMonths}"></td>
         <td><select class="inp" data-chg="type" data-i="${i}" data-k="currency">${db.currencies.map(c => `<option value="${esc(c.code)}" ${t.currency === c.code ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></td>
+        <td><input class="inp" style="width:80px" type="number" step="1" min="0" data-chg="type" data-i="${i}" data-k="prepDays" value="${num(t.prepDays)}"></td>
         <td><input style="width:90px" data-chg="type" data-i="${i}" data-k="note" value="${esc(t.note || '')}"></td>
         <td class="n">${fmt(db.items.filter(x => x.type === t.name).length)}</td>
         <td><button class="sm danger" data-act="delType" data-i="${i}">حذف</button></td></tr>`).join('')}
@@ -1881,6 +1887,7 @@
       if (k === 'units') { ui.dataTab = 'units'; go('data'); }
       else if (k === 'units_transit') { ui.dataTab = 'transit'; go('data'); }
       else if (k === 'po') { ui.poTab = 'orders'; go('po'); }
+      else if (k === 'poLate') { ui.poTab = 'orders'; ui.f.po.status = 'late'; go('po'); }
       else if (k === 'auto') reviewAuto();
       else if (k === 'noCost') { Object.assign(ui.f.items, { flag: 'بدون تكلفة', active: 'الكل', type: 'الكل', group: 'الكل', q: '' }); go('items'); }
       else if (k === 'unknownType') { Object.assign(ui.f.items, { flag: 'نوع غير معروف', active: 'الكل', type: 'الكل', group: 'الكل', q: '' }); go('items'); }

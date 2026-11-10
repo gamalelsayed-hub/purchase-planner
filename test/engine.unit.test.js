@@ -105,8 +105,15 @@ close(E.compute(db).rows[0].transit, 0, 'PO not counted when setting is off');
 db.settings.poAsTransit = true;
 let rr = E.compute(db).rows;
 close(rr[0].transit, 100, 'A1 transit from PO = 10 cartons'); close(rr[1].transit, 35, 'B1 transit = (40-10) + 5');
-// P1 تلقائيًا: الوصول = أول ظهور + أطول توصيل (خارجي 3 أشهر)
-assert.strictEqual(E.poSummary(db, '2026-07-01').find(o => o.no === 'P1').eta, '2026-10-01');
+// P1 (خارجي) تلقائيًا: الشحن المتوقع = أول ظهور + 60 يوم تجهيز، والوصول = + 30 يوم شحن
+let s1 = E.poSummary(db, '2026-07-01').find(o => o.no === 'P1');
+assert.strictEqual(s1.expShip, '2026-08-30'); assert.strictEqual(s1.eta, '2026-09-29'); assert.ok(!s1.shipLate);
+// بعد مدة التجهيز بدون بوليصة ← تنبيه «تأخر الشحن» والحالة تبقى «صادر»
+s1 = E.poSummary(db, '2026-09-05').find(o => o.no === 'P1');
+assert.ok(s1.shipLate); assert.strictEqual(s1.shipLateDays, 6); assert.strictEqual(s1.stage, 'issued');
+// نوع بدون مرحلة شحن (مصنع، 0 يوم) ← بدون تنبيه، والوصول بفترة التوصيل
+const s2 = E.poSummary(db, '2026-12-01').find(o => o.no === 'P2');
+assert.strictEqual(s2.expShip, ''); assert.ok(!s2.shipLate); assert.strictEqual(s2.eta, '2026-08-01');
 // إعادة الرفع بدون P2 ← P2 وصل المخزون
 pr = I.applyPOs(db, poRows([['P1', 'A1', 'كرتون', 10, 1000, 0], ['P1', 'B1', 'حبه', 40, 200, 10]]), { date: '2026-07-15' });
 assert.deepStrictEqual(pr.closed, ['P2']); assert.strictEqual(db.po.orders.P2.status, 'received');
