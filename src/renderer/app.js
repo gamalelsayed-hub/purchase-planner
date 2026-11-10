@@ -260,7 +260,7 @@
   // ================= التنقل =================
   const NAV = [
     { id: 'dashboard', t: 'لوحة الطلب', i: '▦' },
-    { id: 'cycle', t: 'الدورة الشهرية', i: '↻' },
+    { id: 'cycle', t: 'دورة الشراء الشهري', i: '↻' },
     { id: 'order', t: 'قائمة الطلب', i: '☰' },
     { id: 'calc', t: 'الحساب التفصيلي', i: '∑' },
     { id: 'checks', t: 'الفحوصات', i: '✓' },
@@ -594,7 +594,7 @@
       <h3>ابدأ بإحدى الطريقتين:</h3>
       <div class="grid g2">
         <div class="card" style="margin:0"><h2>١. نقل ملف الإكسيل الحالي</h2><p class="hint">اختر ملف «تقرير المشتريات» بنفس هيكله (الأصناف، المبيعات، المخزون، بالطريق، الإعدادات). ينقل كل البيانات والإعدادات والتعديلات اليدوية دفعة واحدة.</p><button class="primary" data-act="importLegacy">استيراد ملف الإكسيل</button></div>
-        <div class="card" style="margin:0"><h2>٢. البدء من الصفر</h2><p class="hint">نزّل قالب الأصناف، عبّئه، واستورده. بعدها استورد المبيعات والمخزون من «الدورة الشهرية».</p><div class="row-flex"><button data-act="tpl" data-k="items">تحميل قالب الأصناف</button><button class="primary" data-act="import" data-k="items">استيراد الأصناف</button></div></div>
+        <div class="card" style="margin:0"><h2>٢. البدء من الصفر</h2><p class="hint">نزّل قالب الأصناف، عبّئه، واستورده. بعدها استورد المبيعات والمخزون من «دورة الشراء الشهري».</p><div class="row-flex"><button data-act="tpl" data-k="items">تحميل قالب الأصناف</button><button class="primary" data-act="import" data-k="items">استيراد الأصناف</button></div></div>
       </div>
       <p class="small" style="margin-top:16px">لديك نسخة احتياطية؟ <button class="link" data-act="restoreBackup">استرجاع نسخة احتياطية</button></p>
     </div>`;
@@ -613,7 +613,7 @@
     return `
     <div class="page-head"><div><h1>لوحة طلب المشتريات — ${monthLabel(res.orderMonth)}</h1>
       <div class="sub">المبيعات من ${monthLabel(res.months[0])} إلى ${monthLabel(res.months[res.months.length - 1])} (${res.months.length} أشهر) — المخزون كما في ${esc(db.stock.date || s.stockDate || '—')} — فترة المراجعة ${s.reviewPeriod} شهر</div></div>
-      <div class="actions"><button data-act="nav" data-p="cycle">الدورة الشهرية</button><button class="primary" data-act="nav" data-p="order">قائمة الطلب</button></div></div>
+      <div class="actions"><button data-act="nav" data-p="cycle">دورة الشراء الشهري</button><button class="primary" data-act="nav" data-p="order">قائمة الطلب</button></div></div>
     ${res.blocking ? `<div class="banner bad"><span class="grow">✗ يوجد <b>${res.blocking}</b> فحص غير سليم — راجع الفحوصات قبل الاعتماد${res.warnings ? ` (و${res.warnings} تنبيه)` : ''}</span><button class="sm" data-act="nav" data-p="checks">الفحوصات</button></div>`
         : `<div class="banner ok"><span class="grow">✓ البيانات سليمة — يمكن اعتماد الطلب${res.warnings ? ` (يوجد ${res.warnings} تنبيه للمراجعة)` : ''}</span><button class="sm" data-act="nav" data-p="checks">الفحوصات</button></div>`}
     ${auto ? `<div class="banner warn"><span class="grow">⚠ يوجد <b>${auto}</b> صنف «غير مصنف» أُضيف تلقائيًا من الاستيراد — حدّد نوعه ومجموعته ووحداته (النوع يحدد فترة التوصيل)</span><button class="sm" data-act="reviewAuto">مراجعة الأصناف</button></div>` : ''}
@@ -649,7 +649,7 @@
     </div>`;
   };
 
-  // ---------- الدورة الشهرية ----------
+  // ---------- دورة الشراء الشهري ----------
   PAGES.cycle = function () {
     const s = db.settings, meta = db.meta || {};
     const lastAppr = db.archive.length ? db.archive.map(a => a.approvedAt).sort().pop() : '';
@@ -660,7 +660,7 @@
     const archived = db.archive.find(a => a.orderMonth === res.orderMonth);
     const step = (n, done, title, body) => `<div class="card step ${done ? 'done' : ''}"><div class="num">${done ? '✓' : n}</div><div class="body"><h2>${title}</h2>${body}</div></div>`;
     return `
-    <div class="page-head"><div><h1>الدورة الشهرية</h1><div class="sub">خطوات إعداد طلب الشراء كل شهر — شهر الطلب الحالي: <b>${monthLabel(res.orderMonth) || '—'}</b></div></div></div>
+    <div class="page-head"><div><h1>دورة الشراء الشهري</h1><div class="sub">خطوات إعداد طلب الشراء كل شهر — شهر الطلب الحالي: <b>${monthLabel(res.orderMonth) || '—'}</b></div></div></div>
     <div class="steps">
     ${step(1, res.missingMonths.length === 0 && after(meta.salesAt), 'مبيعات الشهر المنتهي', `
       <div class="hint">استورد تقرير مبيعات الشهر من النظام (رقم الصنف، الاسم، الوحدة، الوارد، المنصرف). يُضاف للأشهر السابقة، والمتوسط يؤخذ من آخر ${s.nMonths} أشهر. استيراد شهر موجود يستبدله.</div>

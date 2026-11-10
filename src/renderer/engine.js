@@ -389,7 +389,7 @@
       { id: 'negSales', title: 'أسطر مبيعات صافيها سالب (مرتجع أكبر من المنصرف)', count: negSalesRows, sev: 'w', where: 'المبيعات', why: 'تقلل المتوسط — تأكد أنها صحيحة' },
       { id: 'adjNoReason', title: 'تعديلات يدوية بدون سبب', count: count(r => r.delta !== 0 && !String(r.reason).trim()), sev: 'x', where: 'قائمة الطلب ← تعديل', why: 'كل تعديل على السياسة لازم يكون له سبب' },
       { id: 'inactiveAdj', title: 'أصناف موقوفة عليها تعديل يدوي', count: count(r => r.status === 'موقوف + تعديل'), sev: 'w', where: 'قائمة الطلب', why: 'صنف موقوف ومطلوب يدويًا — تأكد من القرار' },
-      { id: 'noStockDate', title: 'تاريخ رصيد المخزون غير محدد', count: (db.stock && db.stock.date) || s.stockDate ? 0 : 1, sev: 'w', where: 'الدورة الشهرية ← المخزون', why: 'للعرض في التقارير' }
+      { id: 'noStockDate', title: 'تاريخ رصيد المخزون غير محدد', count: (db.stock && db.stock.date) || s.stockDate ? 0 : 1, sev: 'w', where: 'دورة الشراء الشهري ← المخزون', why: 'للعرض في التقارير' }
     ];
     for (const c of checks) c.ok = c.count === 0;
     const blocking = checks.filter(c => !c.ok && c.sev === 'x').length;

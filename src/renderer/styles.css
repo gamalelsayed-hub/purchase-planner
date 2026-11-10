@@ -124,7 +124,7 @@ table.t td.muted { color: var(--ink-3); }
 .mark { font-weight: 700; }
 .mark.ok { color: var(--ok); } .mark.bad { color: var(--bad); } .mark.warn { color: var(--warn); }
 
-/* الدورة الشهرية */
+/* دورة الشراء الشهري */
 .steps { counter-reset: st; }
 .step { display: flex; gap: 14px; }
 .step .num { flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--brand-soft); color: var(--brand); display: grid; place-items: center; font-weight: 700; }
