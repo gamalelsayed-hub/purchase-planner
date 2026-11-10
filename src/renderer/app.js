@@ -534,7 +534,13 @@
       foot: `<button class="primary" data-ok>حفظ</button><button data-close>إلغاء</button>`,
       onMount: m => {
         const perms = () => [...m.qa('[data-perm]')].filter(x => x.checked).map(x => x.dataset.perm);
-        const lbl = () => { m.q('#u_rolelbl').textContent = 'الدور: ' + roleLabel({ perms: perms() }); };
+        // القائمة تعكس الخانات دائمًا: اسم القالب المطابق، أو «— اختر قالب —» إذا الخانات مخصصة
+        const lbl = () => {
+          const ps = perms().slice().sort().join(',');
+          const match = Object.entries(ROLE_TEMPLATES).find(([, t]) => t.perms.slice().sort().join(',') === ps);
+          m.q('#u_tpl').value = match ? match[0] : '';
+          m.q('#u_rolelbl').innerHTML = 'الدور: <b>' + roleLabel({ perms: perms() }) + '</b> — الخانات المعلّمة هي اللي تنحفظ (' + perms().length + ' صلاحية)';
+        };
         lbl();
         m.q('.modal-body').addEventListener('change', e => { if (e.target.dataset.perm) lbl(); });
         m.q('#u_tpl').onchange = e => { const t = ROLE_TEMPLATES[e.target.value]; if (!t) return; m.qa('[data-perm]').forEach(x => { x.checked = t.perms.includes(x.dataset.perm); }); lbl(); };
