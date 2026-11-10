@@ -47,7 +47,7 @@
       calc: { type: 'الكل', group: 'الكل', cls: 'الكل', status: 'الكل', q: '' },
       items: { type: 'الكل', group: 'الكل', active: 'الكل', flag: 'الكل', q: '' },
       sales: { q: '' }, stock: { q: '' }, transit: { q: '' },
-      po: { status: 'open', pay: 'الكل', agent: 'الكل', q: '' }, cash: { horizon: '' }
+      po: { status: 'open', pay: 'الكل', agent: 'الكل', q: '' }, cash: { horizon: '', stage: 'الكل' }
     }
   };
 
@@ -349,7 +349,7 @@
     addType: 'settings', delType: 'settings', addExc: 'settings', delExc: 'settings', addGroup: 'settings', renGroup: 'settings', delGroup: 'settings', addCur: 'settings', delCur: 'settings',
     addUser: 'users', editUser: 'users',
     pgExcel: 'export', pgPdf: 'export', pgPrint: 'export', tpl: 'export', tplItemsFull: 'export', exportBackup: 'export',
-    poReceive: 'po_import', poReopen: 'po_import', clearManualTransit: 'import_data', poQuickRecv: 'po_import', poQuickPay: 'po_payments', poNew: 'po_payments'
+    poReceive: 'po_import', poReopen: 'po_import', clearManualTransit: 'import_data', poQuickRecv: 'po_import', poQuickShip: 'po_import', poQuickPay: 'po_payments', poNew: 'po_payments'
   };
   const CHG_PERM = { adj: 'adjust', reason: 'adjust', stockDate: 'import_data', set: 'settings', setBool: 'settings', setPct: 'settings', type: 'settings', cls: 'settings', exc: 'settings', cur: 'settings' };
   const IMPORT_PERM = { items: 'items', sales: 'import_data', stock: 'import_data', transit: 'import_data', po: 'po_import', poPay: 'po_payments' };
@@ -1105,10 +1105,11 @@
   function poRows() {
     const f = ui.f.po, q = f.q.trim().toLowerCase();
     return E.poSummary(db, today()).filter(o =>
-      (f.status === 'الكل' || o.status === f.status) && (f.pay === 'الكل' || o.payStatus === f.pay) && (f.agent === 'الكل' || o.agent === f.agent) &&
+      (f.status === 'الكل' || (f.status === 'open' ? o.status === 'open' : o.stage === f.status)) && (f.pay === 'الكل' || o.payStatus === f.pay) && (f.agent === 'الكل' || o.agent === f.agent) &&
       (!q || o.no.toLowerCase().includes(q) || o.agent.toLowerCase().includes(q) || o.supplier.toLowerCase().includes(q) || o.note.toLowerCase().includes(q) ||
         (db.po.orders[o.no].lines || []).some(l => l.code.toLowerCase().includes(q) || String(l.name).toLowerCase().includes(q))));
   }
+  const stagePill = o => o.stage === 'received' ? `<span class="pill ok" title="${esc(o.receivedAt)} ${o.receivedBy === 'auto' ? '(تلقائي)' : '(يدوي)'}">وصل ${esc(o.receivedAt)}</span>` : o.stage === 'shipped' ? `<span class="pill warn" title="${esc(o.blNo ? 'بوليصة ' + o.blNo : '')}">🚢 تم الشحن</span>` : '<span class="pill brand">صادر</span>';
   const payPill = s => `<span class="pill ${s === 'مسدد' ? 'ok' : s === 'مسدد جزئيًا' ? 'warn' : s === 'غير مسدد' ? 'bad' : ''}">${s}</span>`;
   const etaCell = o => !o.eta ? '<span class="muted">—</span>' : `${esc(o.eta)}${o.etaManual ? ' ✎' : ''}${o.status === 'open' && o.daysToEta != null ? ` <span class="pill ${o.daysToEta < 0 ? 'bad' : o.daysToEta <= 30 ? 'warn' : ''}">${o.daysToEta < 0 ? 'متأخر ' + (-o.daysToEta) + ' يوم' : 'بعد ' + o.daysToEta + ' يوم'}</span>` : ''}`;
   function cashBanner() {
@@ -1117,13 +1118,14 @@
     if (!open.length) return '';
     const over = open.filter(o => o.daysToEta != null && o.daysToEta < 0), soon = open.filter(o => o.daysToEta != null && o.daysToEta >= 0 && o.daysToEta <= H);
     const sum = a => a.reduce((x, o) => x + o.dueSar, 0);
-    return `<div class="banner ${over.length ? 'bad' : 'warn'} no-print"><span class="grow">💰 كاش مطلوب لأوامر الشراء: <b>${money(sum(soon))} ${cur()}</b> خلال ${H} يوم (${fmt(soon.length)} أمر)${over.length ? ` + <b>${money(sum(over))}</b> لأوامر متأخرة (${fmt(over.length)})` : ''} — إجمالي غير المسدد ${money(sum(open))}</span><button class="sm" data-act="poTab" data-k="cash">التفاصيل</button></div>`;
+    const shipSoon = soon.filter(o => o.stage === 'shipped');
+    return `<div class="banner ${over.length ? 'bad' : 'warn'} no-print"><span class="grow">💰 كاش مطلوب لأوامر الشراء: <b>${money(sum(soon))} ${cur()}</b> خلال ${H} يوم (${fmt(soon.length)} أمر، منها مشحون ${money(sum(shipSoon))})${over.length ? ` + <b>${money(sum(over))}</b> لأوامر متأخرة (${fmt(over.length)})` : ''} — إجمالي غير المسدد ${money(sum(open))}</span><button class="sm" data-act="poTab" data-k="cash">التفاصيل</button></div>`;
   }
   PAGES.po = function () {
     const tab = ui.poTab;
     const all = E.poSummary(db, today());
     const open = all.filter(o => o.status === 'open');
-    const tabs = [['orders', `أوامر الشراء (${fmt(open.length)} مفتوح)`], ['cash', 'الكاش المطلوب'], ['imports', 'سجل الاستيراد']];
+    const tabs = [['orders', `أوامر الشراء (${fmt(open.filter(o => o.stage === 'issued').length)} صادر — ${fmt(open.filter(o => o.stage === 'shipped').length)} تم الشحن)`], ['cash', 'الكاش المطلوب'], ['imports', 'سجل الاستيراد']];
     const manualTransit = db.transit.length;
     let body = '';
     if (tab === 'cash') body = poCash(all);
@@ -1133,7 +1135,7 @@
     ], (db.po.imports || []).slice().reverse(), { empty: 'لا يوجد استيراد بعد' });
     else body = poOrdersTab();
     return `<div class="page-head"><div><h1>أوامر الشراء والكاش المطلوب</h1><div class="sub">متابعة الأوامر بالطريق وحالة السداد — ${db.settings.poAsTransit ? 'الكمية المتبقية في الأوامر المفتوحة <b>تنخصم من الطلب</b> كبضاعة بالطريق' : 'الأوامر للمتابعة والكاش فقط و<b>لا تنخصم من الطلب</b> (الإعداد مقفل)'}</div></div>
-      <div class="actions"><button class="primary" data-act="import" data-k="po">استيراد أوامر الشراء (Excel / PDF)</button><button data-act="import" data-k="poPay">استيراد شيت السداد</button><button data-act="poNew">إضافة أمر يدوي</button><button data-act="tpl" data-k="po">قالب أوامر الشراء</button><button data-act="tpl" data-k="poPay">قالب السداد</button></div></div>
+      <div class="actions"><button class="primary" data-act="import" data-k="po">استيراد أوامر الشراء (Excel / PDF)</button><button data-act="import" data-k="poPay">استيراد شيت الشحن والسداد</button><button data-act="poNew">إضافة أمر يدوي</button><button data-act="tpl" data-k="po">قالب أوامر الشراء</button><button data-act="tpl" data-k="poPay">قالب الشحن والسداد</button></div></div>
       ${db.settings.poAsTransit && manualTransit && open.some(o => o.lines) ? `<div class="banner warn no-print"><span class="grow">يوجد ${fmt(manualTransit)} سطر بضاعة بالطريق مُدخل يدويًا بجانب أوامر الشراء — إذا كانت نفس الأوامر فهي تنخصم مرتين.</span><button class="sm" data-act="clearManualTransit">مسح بالطريق اليدوي</button><button class="sm" data-act="dataTabGo" data-k="transit">عرض</button></div>` : ''}
       <div class="tabs">${tabs.map(([k, l]) => `<div class="tab ${tab === k ? 'active' : ''}" data-act="poTab" data-k="${k}">${l}</div>`).join('')}</div>${body}`;
   };
@@ -1143,7 +1145,7 @@
     const agents = [...new Set(E.poSummary(db).map(o => o.agent).filter(Boolean))];
     const sum = k => rows.reduce((a, o) => a + o[k], 0);
     return `<div class="toolbar">
-      <label class="chk">الحالة <select class="inp" data-chg="filter" data-f="po.status"><option value="open" ${f.status === 'open' ? 'selected' : ''}>مفتوح (بالطريق)</option><option value="received" ${f.status === 'received' ? 'selected' : ''}>وصل المخزون</option><option value="الكل" ${f.status === 'الكل' ? 'selected' : ''}>الكل</option></select></label>
+      <label class="chk">الحالة <select class="inp" data-chg="filter" data-f="po.status">${[['open', 'مفتوح (صادر + تم الشحن)'], ['issued', 'صادر (لم يُشحن)'], ['shipped', 'تم الشحن'], ['received', 'وصل المخزون'], ['الكل', 'الكل']].map(([k, l]) => `<option value="${k}" ${f.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label class="chk">السداد <select class="inp" data-chg="filter" data-f="po.pay">${opts(['غير مسدد', 'مسدد جزئيًا', 'مسدد', 'غير محدد'], f.pay, true)}</select></label>
       <label class="chk">المخلّص <select class="inp" data-chg="filter" data-f="po.agent">${opts(agents, f.agent, true)}</select></label>
       <input type="search" id="qPo" placeholder="بحث برقم الأمر أو الصنف…" value="${esc(f.q)}" data-search="po.q">
@@ -1151,8 +1153,9 @@
     </div>
     ${table('poList', [
       { k: 'no', h: 'رقم الأمر', f: o => `<b>${esc(o.no)}</b>${o.flags.includes('stillInReport') ? ' <span class="pill warn" title="علّمته واصل لكنه ما زال في تقرير النظام">لا يزال في التقرير</span>' : ''}` },
-      { k: 'act', h: '', nosort: true, f: o => `${o.status === 'open' ? `<button class="sm ok" data-act="poQuickRecv" data-k="${esc(o.no)}" title="تعليم الأمر وصل المخزون">وصل</button> ` : ''}${o.dueSar > 0.5 ? `<button class="sm" data-act="poQuickPay" data-k="${esc(o.no)}" title="تسجيل دفعة">سداد</button>` : ''}` },
-      { k: 'status', h: 'الحالة', v: o => o.status === 'open' ? 'بالطريق' : 'وصل المخزون', f: o => o.status === 'open' ? '<span class="pill brand">بالطريق</span>' : `<span class="pill ok" title="${esc(o.receivedAt)} ${o.receivedBy === 'auto' ? '(تلقائي)' : '(يدوي)'}">وصل ${esc(o.receivedAt)}</span>` },
+      { k: 'act', h: '', nosort: true, f: o => `${o.stage === 'issued' ? `<button class="sm" data-act="poQuickShip" data-k="${esc(o.no)}" title="صدرت بوليصة شحن">شحن</button> ` : ''}${o.status === 'open' ? `<button class="sm ok" data-act="poQuickRecv" data-k="${esc(o.no)}" title="تعليم الأمر وصل المخزون">وصل</button> ` : ''}${o.dueSar > 0.5 ? `<button class="sm" data-act="poQuickPay" data-k="${esc(o.no)}" title="تسجيل دفعة">سداد</button>` : ''}` },
+      { k: 'stage', h: 'الحالة', v: o => o.stageLabel, f: o => stagePill(o) },
+      { k: 'blNo', h: 'البوليصة' }, { k: 'shipDate', h: 'تاريخ الشحن' }, { k: 'attachments', h: '📎', n: true, f: o => o.attachments ? '📎 ' + o.attachments : '' },
       { k: 'lines', h: 'أصناف', n: true }, { k: 'supplier', h: 'المورد' }, { k: 'agent', h: 'المخلّص' },
       { k: 'currency', h: 'العملة', v: o => curName(o.currency) },
       { k: 'value', h: 'القيمة', n: true, d: 2 }, { k: 'shipping', h: 'الشحن', n: true, d: 2 }, { k: 'extrasSar', h: 'تكاليف إضافية ' + cur(), n: true },
@@ -1163,11 +1166,12 @@
   }
   function poCash(all) {
     const H = ui.f.cash.horizon !== '' ? num(ui.f.cash.horizon) : (num(db.settings.cashHorizonDays) || 60);
-    const open = all.filter(o => o.status === 'open' && o.dueSar > 0.5);
+    const stg = ui.f.cash.stage || 'الكل';
+    const open = all.filter(o => o.status === 'open' && o.dueSar > 0.5 && (stg === 'الكل' || o.stage === stg));
     const t = today();
     const bucketOf = o => o.daysToEta == null ? 'بدون تاريخ' : o.daysToEta < 0 ? 'متأخر (تجاوز التاريخ)' : o.eta.slice(0, 7);
     const m = new Map();
-    for (const o of open) { const k = bucketOf(o); if (!m.has(k)) m.set(k, { key: k, count: 0, dueSar: 0, totalSar: 0, paidSar: 0 }); const g = m.get(k); g.count++; g.dueSar += o.dueSar; g.totalSar += o.totalSar; g.paidSar += o.paidSar; }
+    for (const o of open) { const k = bucketOf(o); if (!m.has(k)) m.set(k, { key: k, count: 0, dueSar: 0, totalSar: 0, paidSar: 0, shippedSar: 0, issuedSar: 0 }); const g = m.get(k); g.count++; g.dueSar += o.dueSar; g.totalSar += o.totalSar; g.paidSar += o.paidSar; if (o.stage === 'shipped') g.shippedSar += o.dueSar; else g.issuedSar += o.dueSar; }
     const ord = k => k.startsWith('متأخر') ? '0' : k === 'بدون تاريخ' ? '9' : k;
     const buckets = [...m.values()].sort((a, b) => ord(a.key).localeCompare(ord(b.key)));
     let cum = 0; buckets.forEach(b => { cum += b.dueSar; b.cum = cum; });
@@ -1176,22 +1180,23 @@
     const over = open.filter(o => o.daysToEta != null && o.daysToEta < 0);
     const byCur = new Map(); for (const o of inH) byCur.set(o.currency, (byCur.get(o.currency) || 0) + o.dueSar / o.rate);
     const agentRows = [...inH.reduce((mm, o) => { const k = o.agent || '—'; const g = mm.get(k) || { key: k, count: 0, dueSar: 0 }; g.count++; g.dueSar += o.dueSar; mm.set(k, g); return mm; }, new Map()).values()];
-    return `<div class="toolbar"><label class="chk">خلال <select class="inp" data-chg="filter" data-f="cash.horizon">${[30, 60, 90, 120, 180, 365].map(d => `<option value="${d}" ${d === H ? 'selected' : ''}>${d} يوم</option>`).join('')}</select></label><span class="small">من اليوم ${esc(t)} — الأوامر المفتوحة غير المسددة بالكامل، حسب تاريخ الوصول المتوقع</span></div>
+    const shipIn = inH.filter(o => o.stage === 'shipped');
+    return `<div class="toolbar"><label class="chk">يشمل <select class="inp" data-chg="filter" data-f="cash.stage">${[['الكل', 'المشحون + الصادر'], ['shipped', 'تم الشحن فقط'], ['issued', 'الصادر فقط']].map(([k, l]) => `<option value="${k}" ${stg === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label><label class="chk">خلال <select class="inp" data-chg="filter" data-f="cash.horizon">${[30, 60, 90, 120, 180, 365].map(d => `<option value="${d}" ${d === H ? 'selected' : ''}>${d} يوم</option>`).join('')}</select></label><span class="small">من اليوم ${esc(t)} — الأوامر المفتوحة غير المسددة بالكامل، حسب تاريخ الوصول المتوقع</span></div>
       <div class="kpis" style="grid-template-columns:repeat(4,minmax(0,1fr))">
         <div class="kpi"><div class="l">مطلوب خلال ${H} يوم (شامل المتأخر)</div><div class="v">${money(sum(inH))}</div><div class="s">${cur()} — ${fmt(inH.length)} أمر${[...byCur].map(([c, v]) => c !== db.currencies[0].code ? ` — ${money(v)} ${esc(curName(c))}` : '').join('')}</div></div>
-        <div class="kpi"><div class="l">منها متأخر</div><div class="v" style="color:var(--bad)">${money(sum(over))}</div><div class="s">${fmt(over.length)} أمر تجاوز تاريخ الوصول</div></div>
+        <div class="kpi"><div class="l">منها تم شحنه (عليه بوليصة)</div><div class="v" style="color:var(--warn)">${money(sum(shipIn))}</div><div class="s">${fmt(shipIn.length)} أمر — متأخر ${money(sum(over))} (${fmt(over.length)})</div></div>
         <div class="kpi"><div class="l">بعد ${H} يوم</div><div class="v">${money(sum(open.filter(o => o.daysToEta != null && o.daysToEta > H)))}</div><div class="s">${cur()}</div></div>
         <div class="kpi"><div class="l">إجمالي غير المسدد</div><div class="v">${money(sum(open))}</div><div class="s">${fmt(open.length)} أمر — المدفوع مقدمًا ${money(sum(all.filter(o => o.status === 'open'), 'paidSar'))}</div></div>
       </div>
       <div class="grid g2">
         <div class="card"><h2>حسب شهر الوصول</h2>${table('cashBuckets', [
           { k: 'key', h: 'الشهر', v: b => /^\d{4}-\d{2}$/.test(b.key) ? monthLabel(b.key) : b.key }, { k: 'count', h: 'أوامر', n: true },
-          { k: 'totalSar', h: 'الإجمالي', n: true }, { k: 'paidSar', h: 'مدفوع مقدمًا', n: true }, { k: 'dueSar', h: 'المطلوب', n: true, f: b => `<b>${money(b.dueSar)}</b>` }, { k: 'cum', h: 'تراكمي', n: true }
+          { k: 'shippedSar', h: 'منه مشحون', n: true }, { k: 'issuedSar', h: 'منه صادر', n: true }, { k: 'paidSar', h: 'مدفوع مقدمًا', n: true }, { k: 'dueSar', h: 'المطلوب', n: true, f: b => `<b>${money(b.dueSar)}</b>` }, { k: 'cum', h: 'تراكمي', n: true }
         ], buckets, { short: true, nofilter: true, empty: 'لا يوجد كاش مطلوب' })}</div>
         <div class="card"><h2>حسب المخلّص (خلال ${H} يوم)</h2>${table('cashAgents', [{ k: 'key', h: 'المخلّص' }, { k: 'count', h: 'أوامر', n: true }, { k: 'dueSar', h: 'المطلوب', n: true }], agentRows, { short: true, nofilter: true, sort: 'dueSar' })}</div>
       </div>
       <div class="card"><h2>الأوامر المطلوب سدادها خلال ${H} يوم</h2>${table('cashList', [
-        { k: 'eta', h: 'الوصول المتوقع', f: etaCell }, { k: 'no', h: 'رقم الأمر' }, { k: 'agent', h: 'المخلّص' }, { k: 'supplier', h: 'المورد' }, { k: 'currency', h: 'العملة', v: o => curName(o.currency) },
+        { k: 'eta', h: 'الوصول المتوقع', f: etaCell }, { k: 'no', h: 'رقم الأمر' }, { k: 'stage', h: 'الحالة', v: o => o.stageLabel, f: o => stagePill(o) }, { k: 'blNo', h: 'البوليصة' }, { k: 'agent', h: 'المخلّص' }, { k: 'supplier', h: 'المورد' }, { k: 'currency', h: 'العملة', v: o => curName(o.currency) },
         { k: 'total', h: 'الإجمالي بالعملة', n: true, d: 2 }, { k: 'totalSar', h: 'الإجمالي ' + cur(), n: true }, { k: 'paidSar', h: 'مدفوع', n: true }, { k: 'dueSar', h: 'المطلوب', n: true, f: o => `<b>${money(o.dueSar)}</b>` },
         { k: 'payStatus', h: 'السداد', f: o => payPill(o.payStatus) }, { k: 'note', h: 'ملاحظة', cls: 'wrap' }
       ], inH, { sort: 'eta', dir: 1, onRow: o => poModal(o.no), empty: 'لا يوجد', foot: { no: 'الإجمالي', totalSar: money(sum(inH, 'totalSar')), paidSar: money(sum(inH, 'paidSar')), dueSar: money(sum(inH)) } })}</div>`;
@@ -1202,7 +1207,7 @@
       ? list('أوامر جديدة', r.newOrders) + list('وصل المخزون (اختفى من التقرير)', r.closed) + list('وصل المخزون (الكمية المتبقية صفر)', r.completed) + list('أعيد فتحها (رجعت للتقرير)', r.reopened) +
         (r.added.length ? `<div class="banner warn" style="margin-top:10px">أضيف ${fmt(r.added.length)} صنف غير موجود كـ «غير مصنف»: ${r.added.map(a => esc(a.code)).join('، ')}</div>` : '') +
         (db.settings.poAsTransit && db.transit.length ? `<div class="banner warn" style="margin-top:10px">يوجد ${fmt(db.transit.length)} سطر بضاعة بالطريق مُدخل يدويًا — إذا كانت نفس هذه الأوامر امسحها حتى لا تنخصم مرتين.</div>` : '')
-      : list('أوامر جديدة من الشيت (بدون أصناف)', r.created) + (r.fromNote.length ? `<div class="banner warn" style="margin-top:10px">دفعات أُخذت من نص الملاحظة — راجع مبلغها وعملتها: ${r.fromNote.map(esc).join('، ')}</div>` : '');
+      : list('صارت «تم الشحن» (موجودة في الشيت = لها بوليصة)', r.shipped) + list('أوامر جديدة من الشيت (بدون أصناف)', r.created) + (r.fromNote.length ? `<div class="banner warn" style="margin-top:10px">دفعات أُخذت من نص الملاحظة — راجع مبلغها وعملتها: ${r.fromNote.map(esc).join('، ')}</div>` : '');
     modal({
       title: kind === 'po' ? 'نتيجة استيراد أوامر الشراء' : 'نتيجة استيراد شيت السداد',
       body: `<div class="banner ok">${esc(msg)}</div>${body}`,
@@ -1218,7 +1223,7 @@
     const auto = E.poAutoEta(db, o);
     modal({
       title: `أمر الشراء ${esc(no)}`, size: 'wide',
-      body: `<div class="row-flex" style="margin-bottom:12px">${o.status === 'open' ? '<span class="pill brand">بالطريق</span>' : `<span class="pill ok">وصل المخزون ${esc(o.receivedAt || '')} ${o.receivedBy === 'auto' ? '(تلقائي: ' + esc(o.receivedNote || '') + ')' : '(يدوي)'}</span>`}${payPill(sm.payStatus)}<span class="small">أول ظهور ${esc(o.firstSeen || '—')} — آخر تحديث ${esc(o.lastSeen || '—')}</span></div>
+      body: `<div class="row-flex" style="margin-bottom:12px">${stagePill(sm)}${o.status === 'received' ? `<span class="small">${o.receivedBy === 'auto' ? 'تلقائي: ' + esc(o.receivedNote || '') : 'يدوي'}</span>` : ''}${payPill(sm.payStatus)}<span class="small">أول ظهور ${esc(o.firstSeen || '—')} — آخر تحديث ${esc(o.lastSeen || '—')}</span></div>
       <div class="calc-grid">
         <div class="c"><div class="l">الإجمالي (قيمة + شحن + تكاليف إضافية)</div><div class="v">${fmt(sm.total, 2)} ${esc(curName(sm.currency))}</div></div>
         <div class="c"><div class="l">بالعملة الأساسية</div><div class="v">${money(sm.totalSar)} ${cur()}</div></div>
@@ -1245,9 +1250,18 @@
         <label class="f">سعر صرف خاص (فارغ = من الإعدادات)<input id="o_rate" type="number" step="any" value="${o.rate || ''}" ${dis(canPay)}></label>
         <label class="f">رسوم الشحن (بعملة الأمر)<input id="o_ship" type="number" step="any" value="${o.shipping || ''}" ${dis(canPay)}></label>
         ${(o.lines || []).length ? '' : `<label class="f">قيمة الأمر (بدون أصناف)<input id="o_val" type="number" step="any" value="${o.manualValue || ''}" ${dis(canPay)}></label>`}
+        <label class="f">رقم بوليصة الشحن<input id="o_bl" value="${esc(o.blNo || '')}" ${dis(canSt)}></label>
+        <label class="f">تاريخ الشحن<input id="o_sd" type="date" value="${esc(o.shipDate || '')}" ${dis(canSt)}></label>
         <label class="f">الوصول المتوقع — فارغ = تلقائي (${esc(auto || '—')})<input id="o_eta" type="date" value="${esc(o.etaManual ? o.eta : '')}" ${dis(canSt)}></label>
         <label class="f full">ملاحظة<input id="o_note" value="${esc(o.note || '')}" ${dis(canPay || canSt)}></label>
       </div>
+      <h3>المرفقات (البوليصة والأوراق)</h3>
+      ${table('poAtt', [
+        { k: 'name', h: 'الملف', f: a => `<button class="link" data-openatt="${esc(a.file)}">📄 ${esc(a.name)}</button>` }, { k: 'kind', h: 'النوع' }, { k: 'size', h: 'الحجم', v: a => a.size ? fmt(a.size / 1024, 0) + ' KB' : '' },
+        { k: 'addedAt', h: 'التاريخ', v: a => (a.addedAt || '').slice(0, 10) }, { k: 'by', h: 'بواسطة' },
+        { k: 'del', h: '', nosort: true, f: a => canSt ? `<button class="sm danger" data-delatt="${esc(a.file)}">حذف</button>` : '' }
+      ], o.attachments || [], { static: true, short: true, empty: 'لا توجد مرفقات' })}
+      <div class="row-flex" style="margin-top:8px">${canSt ? `<select id="att_kind"><option>بوليصة شحن</option><option>فاتورة المورد</option><option>شهادة منشأ</option><option>قائمة تعبئة</option><option>إيصال سداد</option><option>أخرى</option></select><button class="primary" id="att_add">📎 إرفاق ملفات</button>` : ''}<button id="att_folder">فتح مجلد المرفقات</button><span class="small">تنحفظ في مجلد البيانات (المشترك إذا كان على الدرايف)</span></div>
       <h3>التكاليف الإضافية</h3>
       ${table('poExtras', [
         { k: 'date', h: 'التاريخ' }, { k: 'desc', h: 'البيان' }, { k: 'amount', h: 'المبلغ', n: true, d: 2 }, { k: 'currency', h: 'العملة', v: x => curName(x.currency || o.currency) },
@@ -1278,7 +1292,7 @@
         <button class="primary" id="p_add">+ إضافة دفعة</button><button id="p_full">سداد المتبقي بالكامل</button>
       </div>` : ''}
 `,
-      foot: `<button class="primary" data-save ${canPay || canSt ? '' : 'disabled'}>حفظ</button><button data-close>إغلاق</button><span class="grow"></span>${canSt ? (o.status === 'open' ? '<button class="ok" data-recv>وصل المخزون</button>' : '<button data-reopen>إعادة فتح (لم يصل)</button>') : ''}${can('data_admin') ? '<button class="danger" data-delpo>حذف الأمر</button>' : ''}`,
+      foot: `<button class="primary" data-save ${canPay || canSt ? '' : 'disabled'}>حفظ</button><button data-close>إغلاق</button><span class="grow"></span>${canSt && o.status === 'open' ? (o.shipped ? '<button data-unship>إلغاء «تم الشحن»</button>' : '<button data-ship>🚢 تم الشحن</button>') : ''}${canSt ? (o.status === 'open' ? '<button class="ok" data-recv>وصل المخزون</button>' : '<button data-reopen>إعادة فتح (لم يصل)</button>') : ''}${can('data_admin') ? '<button class="danger" data-delpo>حذف الأمر</button>' : ''}`,
       onMount: m => {
         const save = () => {
           if (canPay) {
@@ -1286,7 +1300,11 @@
             o.rate = m.q('#o_rate').value === '' ? null : num(m.q('#o_rate').value); o.shipping = num(m.q('#o_ship').value);
             if (m.q('#o_val')) o.manualValue = num(m.q('#o_val').value);
           }
-          if (canSt) { const e = m.q('#o_eta').value; o.eta = e; o.etaManual = !!e; }
+          if (canSt) {
+            const e = m.q('#o_eta').value; o.eta = e; o.etaManual = !!e;
+            o.blNo = m.q('#o_bl').value.trim(); o.shipDate = m.q('#o_sd').value;
+            if ((o.blNo || o.shipDate) && !o.shipped && o.status === 'open') { o.shipped = true; o.shippedAt = o.shipDate || today(); o.shippedBy = 'manual'; }
+          }
           if (canPay || canSt) o.note = m.q('#o_note').value.trim();
         };
         m.q('[data-save]').onclick = () => { save(); log('تعديل أمر الشراء ' + no); m.close(); commit(); toast('تم الحفظ', 'ok'); };
@@ -1306,6 +1324,23 @@
         };
         m.q('.modal-body').addEventListener('click', e => { const bx = e.target.closest('[data-delext]'); if (!bx) return; save(); o.extraCosts = (o.extraCosts || []).filter(x => x.id !== bx.dataset.delext); log('حذف تكلفة إضافية من أمر الشراء ' + no); reopenModal(); });
         m.q('.modal-body').addEventListener('click', e => { const b = e.target.closest('[data-delpay]'); if (!b) return; save(); o.payments = o.payments.filter(p => p.id !== b.dataset.delpay); log('حذف دفعة من أمر الشراء ' + no); reopenModal(); });
+        const aa = m.q('#att_add');
+        if (aa) aa.onclick = async () => {
+          const files = await api.attachAdd(no); if (!files.length) return;
+          save(); o.attachments = o.attachments || [];
+          for (const f of files) o.attachments.push(Object.assign(f, { kind: m.q('#att_kind').value, addedAt: nowStamp(), by: ui.user.name }));
+          log(`إرفاق ${files.length} ملف لأمر الشراء ${no}`); reopenModal();
+          if (files.some(f => f.size > 20 * 1024 * 1024)) toast('ملف أكبر من 20MB — قد يبطئ مزامنة الدرايف', 'bad');
+        };
+        m.q('#att_folder').onclick = () => api.attachFolder(no);
+        m.q('.modal-body').addEventListener('click', async e => {
+          const op = e.target.closest('[data-openatt]'); if (op) { const err = await api.attachOpen(no, op.dataset.openatt); if (err) toast(err, 'bad'); return; }
+          const dl = e.target.closest('[data-delatt]'); if (!dl) return;
+          if (!await confirmBox('حذف المرفق نهائيًا؟', { ok: 'حذف', danger: true })) return;
+          await api.attachRemove(no, dl.dataset.delatt); save(); o.attachments = (o.attachments || []).filter(a => a.file !== dl.dataset.delatt); log('حذف مرفق من أمر الشراء ' + no); reopenModal();
+        });
+        const sh = m.q('[data-ship]'); if (sh) sh.onclick = () => { save(); o.shipped = true; o.shippedAt = o.shipDate || today(); o.shippedBy = 'manual'; log('أمر الشراء ' + no + ' تم الشحن (يدوي)'); reopenModal(); };
+        const us = m.q('[data-unship]'); if (us) us.onclick = () => { save(); o.shipped = false; o.shippedAt = ''; o.shippedBy = ''; log('إلغاء حالة الشحن لأمر الشراء ' + no); reopenModal(); };
         const rv = m.q('[data-recv]'); if (rv) rv.onclick = () => { save(); o.status = 'received'; o.receivedAt = today(); o.receivedBy = 'manual'; o.receivedNote = 'يدوي — ' + ui.user.name; log('أمر الشراء ' + no + ' وصل المخزون (يدوي)'); m.close(); commit(); };
         const ro = m.q('[data-reopen]'); if (ro) ro.onclick = () => { save(); o.status = 'open'; o.receivedAt = ''; o.receivedBy = ''; o.flags = (o.flags || []).filter(f => f !== 'stillInReport'); log('إعادة فتح أمر الشراء ' + no); m.close(); commit(); };
         const dp = m.q('[data-delpo]'); if (dp) dp.onclick = async () => { if (!await confirmBox(`حذف أمر الشراء ${esc(no)} نهائيًا مع دفعاته؟`, { ok: 'حذف', danger: true })) return; delete db.po.orders[no]; log('حذف أمر الشراء ' + no); m.close(); commit(); };
@@ -1375,6 +1410,7 @@
       ${db.currencies.map((c, i) => `<tr><td><input class="inp" style="width:80px" data-chg="cur" data-i="${i}" data-k="code" value="${esc(c.code)}"></td><td><input class="inp" style="width:120px" data-chg="cur" data-i="${i}" data-k="name" value="${esc(c.name)}"></td><td><input class="inp" style="width:100px" type="number" step="any" min="0" data-chg="cur" data-i="${i}" data-k="rate" value="${c.rate}"></td><td>${i ? `<button class="sm danger" data-act="delCur" data-i="${i}">حذف</button>` : '<span class="small">الأساسية</span>'}</td></tr>`).join('')}
       </tbody></table><button class="sm" data-act="addCur" style="margin-top:8px">+ إضافة عملة</button>
       <div class="form f4" style="margin-top:12px"><label class="f">أفق الكاش المطلوب (يوم)<input class="inp" type="number" step="1" min="1" data-chg="set" data-k="cashHorizonDays" value="${esc(s.cashHorizonDays)}"></label>
+        <label class="f">مدة الشحن حتى الوصول (يوم) — للأوامر المشحونة<input class="inp" type="number" step="1" min="1" data-chg="set" data-k="shipTransitDays" value="${esc(s.shipTransitDays)}"></label>
         <label class="f" style="grid-column:span 3">خصم أوامر الشراء المفتوحة من الطلب كبضاعة بالطريق<select class="inp" data-chg="setBool" data-k="poAsTransit"><option value="0" ${!s.poAsTransit ? 'selected' : ''}>مقفل — أوامر الشراء للمتابعة والكاش فقط، والطلب يعتمد على البضاعة بالطريق اليدوية</option><option value="1" ${s.poAsTransit ? 'selected' : ''}>مفعّل — الكمية المتبقية في الأوامر المفتوحة تنخصم من الطلب تلقائيًا</option></select></label></div>
     </div>
 
@@ -1505,7 +1541,7 @@
             await saveNow(); await api.snapshot('before-import-' + kind);
             const opt = { date: kind === 'po' ? m.q('#w_date').value : today(), user: ui.user.name, file: wb.name, currencyHint: curHint() };
             const r = kind === 'po' ? I.applyPOs(db, recs0, opt) : I.applyPOPay(db, recs0, opt);
-            const msg = kind === 'po' ? `أوامر الشراء: ${fmt(r.orders)} أمر (${fmt(r.lines)} سطر) — جديد ${fmt(r.newOrders.length)} — وصل المخزون ${fmt(r.closed.length + r.completed.length)}${r.reopened.length ? ' — أعيد فتح ' + fmt(r.reopened.length) : ''}` : `سداد أوامر الشراء: ${fmt(r.orders)} أمر — مسدد بالكامل ${fmt(r.paidFull)} — دفعات من الملاحظات ${fmt(r.fromNote.length)}${r.created.length ? ' — أوامر جديدة ' + fmt(r.created.length) : ''}`;
+            const msg = kind === 'po' ? `أوامر الشراء: ${fmt(r.orders)} أمر (${fmt(r.lines)} سطر) — جديد ${fmt(r.newOrders.length)} — وصل المخزون ${fmt(r.closed.length + r.completed.length)}${r.reopened.length ? ' — أعيد فتح ' + fmt(r.reopened.length) : ''}` : `شيت الشحن والسداد: ${fmt(r.orders)} أمر — تم الشحن (جديد) ${fmt(r.shipped.length)} — مسدد بالكامل ${fmt(r.paidFull)} — دفعات من الملاحظات ${fmt(r.fromNote.length)}${r.created.length ? ' — أوامر جديدة ' + fmt(r.created.length) : ''}`;
             log(msg); m.close(); ui.page = 'po'; ui.poTab = 'orders'; commit(); await saveNow();
             poImportResult(kind, r, msg);
             return;
@@ -1654,7 +1690,7 @@
       stock: 'الوحدة يجب أن تكون الوحدة الأساسية أو وحدة معرّفة للصنف.',
       transit: 'أوامر الشراء اللي لسه ما وصلت.',
       po: 'سطر لكل صنف في أمر الشراء. ارفع كل الأوامر المفتوحة في كل مرة: الأمر المفتوح اللي ما يكون في الملف يتحول «وصل المخزون». القيمة = إجمالي السطر بعملة الأمر.',
-      poPay: 'سطر لكل أمر. حالة السداد: تم السداد / لم يتم السداد. المبلغ المدفوع (اختياري) للسداد الجزئي أو العربون. التاريخ بصيغة 2026-12-31.'
+      poPay: 'سطر لكل أمر تم شحنه (له بوليصة) — وجوده هنا يحوّله «تم الشحن». حالة السداد: تم السداد / لم يتم السداد. المبلغ المدفوع (اختياري) للسداد الجزئي أو العربون. التاريخ بصيغة 2026-12-31.'
     };
     return { sheets: [{ name: K.title, title: 'قالب ' + K.title, subtitle: notes[kind], columns: cols, rows }] };
   }
@@ -1759,6 +1795,23 @@
       await api.setDataDir(null, 'default'); location.reload();
     },
     poTab: el => { ui.poTab = el.dataset.k; go('po'); },
+    poQuickShip: el => {
+      const no = el.dataset.k, o = db.po.orders[no];
+      modal({
+        title: `تم شحن أمر الشراء ${esc(no)}`, size: 'narrow',
+        body: `<div class="form" style="grid-template-columns:1fr">
+          <label class="f">رقم بوليصة الشحن<input id="s_bl"></label>
+          <label class="f">تاريخ الشحن<input id="s_sd" type="date" value="${today()}"></label>
+          <label class="f">الوصول المتوقع — فارغ = تاريخ الشحن + ${fmt(num(db.settings.shipTransitDays) || 30)} يوم<input id="s_eta" type="date"></label></div>
+          <p class="small">تقدر ترفق البوليصة من شاشة الأمر بعدها.</p>`,
+        foot: `<button class="primary" data-ok>حفظ</button><button data-close>إلغاء</button>`,
+        onMount: m => { m.q('[data-ok]').onclick = () => {
+          o.shipped = true; o.blNo = m.q('#s_bl').value.trim(); o.shipDate = m.q('#s_sd').value || today(); o.shippedAt = o.shipDate; o.shippedBy = 'manual';
+          const e = m.q('#s_eta').value; if (e) { o.eta = e; o.etaManual = true; } else if (o.etaManual && o.eta && o.eta < o.shipDate) { o.etaManual = false; o.eta = ''; }
+          log('أمر الشراء ' + no + ' تم الشحن' + (o.blNo ? ' — بوليصة ' + o.blNo : '')); m.close(); ui.keepScroll = true; commit();
+        }; }
+      });
+    },
     poQuickRecv: async el => {
       const no = el.dataset.k, o = db.po.orders[no];
       if (!await confirmBox(`تعليم أمر الشراء ${esc(no)} «وصل المخزون»؟ كميته المتبقية تنشال من البضاعة بالطريق.`, { ok: 'وصل المخزون' })) return;

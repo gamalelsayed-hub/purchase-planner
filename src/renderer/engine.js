@@ -131,6 +131,7 @@
       extraBasis: 'avg_std', // avg_std = (المتوسط + الانحراف) ، avg = المتوسط فقط
       classifyScope: 'all', // all = كل الأصناف ، active = النشطة فقط
       cashHorizonDays: 60, // أفق الكاش المطلوب (يوم)
+      shipTransitDays: 30, // مدة الشحن من تاريخ الشحن حتى الوصول (يوم)
       poAsTransit: false, // خصم الكمية المتبقية في أوامر الشراء المفتوحة من الطلب كبضاعة بالطريق
       defaultType: 'مصنع',
       defaultLead: 1,
@@ -456,7 +457,19 @@
     }
     return lead || num((db.settings || {}).defaultLead) || 1;
   }
-  function poAutoEta(db, o) { return addMonthsDate(o.firstSeen, poLead(db, o)); }
+  function addDaysDate(iso, days) {
+    if (!iso) return '';
+    const d = new Date(iso + 'T00:00:00Z'); if (isNaN(d)) return '';
+    d.setUTCDate(d.getUTCDate() + Math.round(num(days)));
+    return d.toISOString().slice(0, 10);
+  }
+  // الوصول التلقائي: المشحون = تاريخ الشحن + مدة الشحن ، الصادر = أول ظهور (أو تاريخ الأمر) + فترة التوصيل
+  function poAutoEta(db, o) {
+    if (o.shipped && (o.shipDate || o.shippedAt)) return addDaysDate(o.shipDate || o.shippedAt, num((db.settings || {}).shipTransitDays) || 30);
+    return addMonthsDate(o.poDate || o.firstSeen, poLead(db, o));
+  }
+  const stageOf = o => o.status === 'received' ? 'received' : o.shipped ? 'shipped' : 'issued';
+  const STAGE_LABEL = { issued: 'صادر', shipped: 'تم الشحن', received: 'وصل المخزون' };
   function poSummary(db, todayIso) {
     const today = todayIso || new Date().toISOString().slice(0, 10);
     const orders = (db.po && db.po.orders) || {};
@@ -478,7 +491,7 @@
       const daysToEta = eta ? Math.round((new Date(eta + 'T00:00:00Z') - new Date(today + 'T00:00:00Z')) / 86400000) : null;
       const payStatus = totalSar <= 0 ? 'غير محدد' : paidSar <= 0.005 ? 'غير مسدد' : paidSar + 0.5 >= totalSar ? 'مسدد' : 'مسدد جزئيًا';
       return {
-        no, status: o.status, currency: o.currency || 'SAR', rate, value, shipping, extras, extrasSar, total, totalSar, paidSar, dueSar, payStatus,
+        no, status: o.status, stage: stageOf(o), stageLabel: STAGE_LABEL[stageOf(o)], blNo: o.blNo || '', shipDate: o.shipDate || o.shippedAt || '', attachments: (o.attachments || []).length, currency: o.currency || 'SAR', rate, value, shipping, extras, extrasSar, total, totalSar, paidSar, dueSar, payStatus,
         remainingValue, lines: (o.lines || []).length, eta, etaManual: !!o.etaManual, daysToEta, agent: o.agent || '', supplier: o.supplier || '',
         firstSeen: o.firstSeen || '', lastSeen: o.lastSeen || '', receivedAt: o.receivedAt || '', receivedBy: o.receivedBy || '', note: o.note || '', poDate: o.poDate || '',
         payments: (o.payments || []).length, flags: o.flags || []
@@ -487,7 +500,7 @@
   }
 
   const Engine = {
-    compute, openPoLines, poSummary, poAutoEta, poLead, addMonthsDate, fxRate, normsinv, normUnit, normCode, num, toMonth, monthAdd, monthLabel,
+    compute, openPoLines, poSummary, poAutoEta, addDaysDate, stageOf, STAGE_LABEL, poLead, addMonthsDate, fxRate, normsinv, normUnit, normCode, num, toMonth, monthAdd, monthLabel,
     unitFactor, purchaseFactor, allUnits, emptyDb, defaultSettings, defaultClasses, abc, roundUp, exceptionApplies
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Engine;

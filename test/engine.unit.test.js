@@ -124,6 +124,11 @@ close(p3.dueSar, (2000 - 500) * 3.75, 'P3 due'); assert.strictEqual(p3.payStatus
 // إعادة استيراد الشيت لا تكرر الدفعات
 I.applyPOPay(db, [{ poNo: 'P1', status: 'تم السداد' }], { date: '2026-07-21', currencyHint: 'USD' });
 assert.strictEqual(db.po.orders.P1.payments.length, 1);
+// المراحل: الأوامر في شيت المحاسب ← «تم الشحن»، والوصول = تاريخ الشحن + مدة الشحن
+assert.strictEqual(E.stageOf(db.po.orders.P1), 'shipped'); assert.strictEqual(E.stageOf(db.po.orders.P2), 'issued');
+I.applyPOPay(db, [{ poNo: 'P2', status: 'لم يتم السداد', shipDate: '2026-08-01', blNo: 'BL-77' }], { date: '2026-08-02' });
+const p2 = E.poSummary(db, '2026-08-02').find(o => o.no === 'P2');
+assert.strictEqual(p2.stage, 'shipped'); assert.strictEqual(p2.blNo, 'BL-77'); assert.strictEqual(p2.eta, '2026-08-31', 'ship date + 30 days');
 // تكاليف إضافية بعملة مختلفة تدخل الإجمالي والمتبقي
 db.po.orders.P1.extraCosts = [{ id: 'x1', desc: 'جمارك', amount: 375, currency: 'SAR' }];
 const p1b = E.poSummary(db, '2026-07-21').find(o => o.no === 'P1');

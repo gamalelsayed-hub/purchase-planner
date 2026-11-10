@@ -247,6 +247,36 @@ ipcMain.handle('update:install', async () => {
 });
 ipcMain.handle('app:openUrl', async (_e, url) => { if (/^https:\/\/github\.com\//.test(url)) shell.openExternal(url); });
 
+// ---------- مرفقات أوامر الشراء ----------
+// تنحفظ في مجلد البيانات (attachments/<رقم الأمر>/) — إذا كان المجلد على الدرايف يشوفها كل المستخدمين
+const safeName = x => String(x).replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').slice(0, 120);
+const attachDir = no => path.join(dataDir(), 'attachments', safeName(no));
+ipcMain.handle('attach:add', async (_e, no) => {
+  const r = await dialog.showOpenDialog(win, { title: 'إرفاق ملفات لأمر الشراء ' + no, properties: ['openFile', 'multiSelections'], filters: [{ name: 'كل الملفات', extensions: ['*'] }, { name: 'PDF / صور', extensions: ['pdf', 'jpg', 'jpeg', 'png'] }] });
+  if (r.canceled || !r.filePaths.length) return [];
+  const dir = attachDir(no);
+  fs.mkdirSync(dir, { recursive: true });
+  const out = [];
+  for (const f of r.filePaths) {
+    const st = fs.statSync(f);
+    const stored = Date.now() + '-' + safeName(path.basename(f));
+    fs.copyFileSync(f, path.join(dir, stored));
+    out.push({ name: path.basename(f), file: stored, size: st.size });
+  }
+  return out;
+});
+ipcMain.handle('attach:open', async (_e, no, file) => {
+  const p = path.join(attachDir(no), safeName(file));
+  if (!fs.existsSync(p)) return 'الملف غير موجود (ربما الدرايف لسه ما زامن): ' + p;
+  return shell.openPath(p);
+});
+ipcMain.handle('attach:remove', async (_e, no, file) => {
+  const p = path.join(attachDir(no), safeName(file));
+  try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch (e) { return false; }
+  return true;
+});
+ipcMain.handle('attach:folder', async (_e, no) => { const d = attachDir(no); fs.mkdirSync(d, { recursive: true }); return shell.openPath(d); });
+
 // ---------- ملفات ----------
 ipcMain.handle('file:openExcel', async (_e, opts = {}) => {
   const r = await dialog.showOpenDialog(win, {

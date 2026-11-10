@@ -76,7 +76,7 @@
       ]
     },
     poPay: {
-      title: 'سداد أوامر الشراء',
+      title: 'شحن وسداد أوامر الشراء',
       fields: [
         { key: 'poNo', label: 'رقم الأمر', aliases: ['رقم الأمر', 'رقم الامر', 'رقم امر الشراء', 'امر الشراء', 'po'], required: true },
         { key: 'value', label: 'قيمة الأمر', aliases: ['القيمة دولار', 'قيمة الأمر', 'قيمة الامر', 'القيمة', 'value'] },
@@ -87,6 +87,8 @@
         { key: 'payDate', label: 'تاريخ السداد', aliases: ['تاريخ السداد', 'تاريخ الدفع'] },
         { key: 'agent', label: 'المخلّص', aliases: ['المخلص', 'المخلّص', 'agent'] },
         { key: 'supplier', label: 'المورد', aliases: ['المورد', 'supplier'] },
+        { key: 'blNo', label: 'رقم البوليصة', aliases: ['رقم البوليصة', 'البوليصة', 'بوليصة الشحن', 'رقم بوليصة الشحن', 'bl', 'blno', 'b/l'] },
+        { key: 'shipDate', label: 'تاريخ الشحن', aliases: ['تاريخ الشحن', 'تاريخ البوليصة', 'shipdate', 'etd'] },
         { key: 'eta', label: 'تاريخ الوصول المتوقع', aliases: ['تاريخ الوصول المتوقع', 'تاريخ الوصول', 'eta'] },
         { key: 'note', label: 'ملاحظة', aliases: ['ملاحظة', 'ملاحظات', 'note'] }
       ]
@@ -342,7 +344,7 @@
   function applyPOPay(db, recs, { date, user, file, currencyHint } = {}) {
     const po = ensurePo(db);
     const day = date || new Date().toISOString().slice(0, 10);
-    const res = { orders: 0, created: [], paidFull: 0, partial: 0, fromNote: [], skipped: 0 };
+    const res = { orders: 0, created: [], shipped: [], paidFull: 0, partial: 0, fromNote: [], skipped: 0 };
     const has = (r, k) => r[k] != null && String(r[k]).trim() !== '';
     for (const r of recs) {
       if (!r.poNo || !/\d/.test(r.poNo)) { res.skipped++; continue; }
@@ -362,6 +364,10 @@
       if (has(r, 'supplier')) o.supplier = String(r.supplier).trim();
       if (has(r, 'note')) o.note = String(r.note).trim();
       const eta = toDate(r.eta); if (eta) { o.eta = eta; o.etaManual = true; }
+      // وجود الأمر في شيت المحاسب = صدرت له بوليصة شحن ← «تم الشحن»
+      if (!o.shipped) { o.shipped = true; o.shippedAt = day; o.shippedBy = 'sheet'; res.shipped.push(r.poNo); }
+      if (has(r, 'blNo')) o.blNo = String(r.blNo).trim();
+      const sd = toDate(r.shipDate); if (sd) o.shipDate = sd;
       o.payments = (o.payments || []).filter(p => p.source !== 'sheet');
       const st = String(r.status || '').trim();
       const notPaid = /لم|غير|not|unpaid/i.test(st);
