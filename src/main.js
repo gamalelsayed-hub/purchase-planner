@@ -282,7 +282,7 @@ ipcMain.handle('file:openExcel', async (_e, opts = {}) => {
   const r = await dialog.showOpenDialog(win, {
     title: opts.title || 'اختر ملف Excel',
     properties: ['openFile'],
-    filters: [{ name: 'Excel / PDF', extensions: ['xlsx', 'xlsm', 'csv', 'pdf'] }, { name: 'Excel', extensions: ['xlsx', 'xlsm', 'csv'] }, { name: 'PDF', extensions: ['pdf'] }]
+    filters: [{ name: 'Excel / PDF', extensions: ['xlsx', 'xls', 'xlsm', 'csv', 'pdf'] }, { name: 'Excel', extensions: ['xlsx', 'xls', 'xlsm', 'csv'] }, { name: 'PDF', extensions: ['pdf'] }]
   });
   if (r.canceled || !r.filePaths[0]) return null;
   const file = r.filePaths[0];

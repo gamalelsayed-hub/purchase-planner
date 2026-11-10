@@ -917,7 +917,7 @@
 
   // ---------- الفحوصات ----------
   PAGES.checks = function () {
-    const links = { salesUnit: 'units', stockUnit: 'units', transitUnit: 'units', autoAdded: 'auto', noCost: 'noCost', adjNoReason: 'adj', inactiveAdj: 'adj', months: 'cycle', unknownType: 'unknownType', negStock: 'negStock', poOverdue: 'po', poShipLate: 'poLate', trackLate: 'shipLate', demurrage: 'shipDem', demurrageSoon: 'shipSoon', transitBoth: 'units_transit' };
+    const links = { salesUnit: 'units', stockUnit: 'units', transitUnit: 'units', autoAdded: 'auto', noCost: 'noCost', adjNoReason: 'adj', inactiveAdj: 'adj', months: 'cycle', unknownType: 'unknownType', negStock: 'negStock', poOverdue: 'po', poShipLate: 'poLate', trackLate: 'shipLate', demurrage: 'shipDem', demurrageSoon: 'shipSoon', needTelex: 'shipTelex', transitBoth: 'units_transit' };
     return `
     <div class="page-head"><div><h1>فحوصات جودة البيانات</h1><div class="sub">راجعها قبل اعتماد الطلب. ✗ = يجب التصحيح، ⚠ = تنبيه للمراجعة.</div></div></div>
     ${res.blocking ? `<div class="banner bad">✗ يوجد ${res.blocking} فحص غير سليم</div>` : '<div class="banner ok">✓ كل الفحوصات الأساسية سليمة</div>'}
@@ -1435,12 +1435,13 @@
       if (f.alert === 'متأخرة' && !t.late) return false;
       if (f.alert === 'غرامة' && !t.demurrageOverdue) return false;
       if (f.alert === 'قربت' && !t.demurrageSoon) return false;
+      if (f.alert === 'مطلوب تلكس' && !t.needTelex) return false;
       if (f.party !== 'الكل' && t.forwarder !== f.party && t.clearer !== f.party) return false;
       if (q && !(t.no.toLowerCase().includes(q) || t.blNo.toLowerCase().includes(q) || t.containers.some(c => c.no.toLowerCase().includes(q)) || t.supplier.toLowerCase().includes(q))) return false;
       return true;
     }).map(t => Object.assign(t, { eta: (po.get(t.no) || {}).eta || '', dueSar: (po.get(t.no) || {}).dueSar || 0, payStatus: (po.get(t.no) || {}).payStatus || '' }));
   }
-  const trackPill = t => `<span class="pill ${t.closed ? 'ok' : t.late ? 'bad' : t.group === 'عند المورد' ? 'brand' : 'warn'}" title="${esc(t.party)}">${esc(t.stageName)}</span>`;
+  const trackPill = t => (t.needTelex ? '<span class="pill bad" title="المخلّص ينتظر التلكس منّا">⚠ مطلوب تلكس</span> ' : '') + `<span class="pill ${t.closed ? 'ok' : t.late ? 'bad' : t.group === 'عند المورد' ? 'brand' : 'warn'}" title="${esc(t.party)}">${esc(t.stageName)}</span>`;
   const demCell = t => !t.containers.length ? '' : t.demurrageOverdue ? `<span class="pill bad">غرامة! متأخر ${-t.demurrageLeft} يوم</span>` : t.demurrageSoon ? `<span class="pill warn">باقي ${t.demurrageLeft} يوم</span>` : t.containersOpen ? (t.demurrageLeft != null ? `<span class="pill">باقي ${t.demurrageLeft} يوم</span>` : '<span class="small">لم تصل الميناء</span>') : '<span class="pill ok">سُلّمت كلها</span>';
   function demurrageBanner() {
     const ts = E.trackSummary(db, today()).filter(t => !t.closed);
@@ -1457,13 +1458,14 @@
     return `<div class="page-head"><div><h1>المعاملات الخارجية</h1><div class="sub">متابعة كل أمر شراء خارجي من الإصدار حتى تسليم الحاوية فارغة للوكيل — المرجع: رقم أمر الشراء</div></div>
       <div class="actions"><button class="primary" data-act="import" data-k="track">استيراد تحديث المخلّص / الوكيل</button><button data-act="tpl" data-k="track">قالب التحديث</button>${can('settings') ? '<button data-act="nav" data-p="settings">المراحل والجهات</button>' : ''}</div></div>
       ${demurrageBanner()}
-      <div class="kpis" style="grid-template-columns:repeat(6,minmax(0,1fr))">
+      <div class="kpis" style="grid-template-columns:repeat(7,minmax(0,1fr))">
         ${GROUPS.map(g => `<div class="kpi click" data-act="shipGroup" data-k="${g}" style="cursor:pointer"><div class="l">${g}</div><div class="v">${fmt(cnt(g))}</div><div class="s">أمر</div></div>`).join('')}
+        <div class="kpi click" data-act="shipAlert" data-k="مطلوب تلكس" style="cursor:pointer"><div class="l">مطلوب تلكس منّا</div><div class="v" style="color:var(--bad)">${fmt(all.filter(t => t.needTelex).length)}</div><div class="s">ينتظرها المخلّص</div></div>
         <div class="kpi click" data-act="shipAlert" data-k="متأخرة" style="cursor:pointer"><div class="l">متأخرة في مرحلتها</div><div class="v" style="color:var(--bad)">${fmt(all.filter(t => t.late && !t.closed).length)}</div><div class="s">عدّت المدة المتوقعة</div></div>
       </div>
       <div class="toolbar">
         <label class="chk">المجموعة <select class="inp" data-chg="filter" data-f="ship.group">${opts(['نشطة'].concat(GROUPS), f.group, true)}</select></label>
-        <label class="chk">تنبيه <select class="inp" data-chg="filter" data-f="ship.alert">${opts(['متأخرة', 'قربت', 'غرامة'], f.alert, true)}</select></label>
+        <label class="chk">تنبيه <select class="inp" data-chg="filter" data-f="ship.alert">${opts(['متأخرة', 'مطلوب تلكس', 'قربت', 'غرامة'], f.alert, true)}</select></label>
         <label class="chk">الجهة <select class="inp" data-chg="filter" data-f="ship.party">${opts(parties, f.party, true)}</select></label>
         <input type="search" id="qShip" placeholder="بحث برقم الأمر أو البوليصة أو الحاوية…" value="${esc(f.q)}" data-search="ship.q">
         <span class="grow"></span><span class="pill brand">${fmt(rows.length)} أمر</span>
@@ -1477,6 +1479,7 @@
         { k: 'blNo', h: 'البوليصة', f: t => esc(t.blNo) + (t.docType ? ` <span class="small">(${esc(t.docType)})</span>` : '') },
         { k: 'containers', h: 'الحاويات', v: t => t.containers.map(c => c.no).join(' '), f: t => t.containers.length ? `${fmt(t.containers.length)} <span class="small">(${fmt(t.containersOpen)} لم تُسلّم)</span>` : '' },
         { k: 'demurrageLeft', h: 'أيام السماح', n: true, f: demCell },
+        { k: 'portEta', h: 'وصول الميناء (المخلّص)' }, { k: 'lastStatus', h: 'آخر حالة من المخلّص', cls: 'wrap' },
         { k: 'eta', h: 'الوصول المتوقع' }, { k: 'dueSar', h: 'المتبقي للسداد', n: true }
       ], rows, { sort: 'stageIdx', dir: 1, select: t => t.no, bulk: 'bulkPo', onRow: t => poModal(t.no), empty: 'لا توجد معاملات خارجية بهذه الفلاتر' })}`;
   };
@@ -1491,6 +1494,7 @@
     const stages = db.shipStages || [];
     return `<h3>المتابعة الخارجية</h3>
       <div class="track-bar">${stages.map((s, i) => `<span class="ts ${i < t.stageIdx ? 'done' : i === t.stageIdx ? (t.late ? 'cur late' : 'cur') : ''}" title="${esc(s.party)}${s.days ? ' — ' + s.days + ' يوم' : ''}">${esc(s.name)}</span>`).join('')}</div>
+      ${t.clearerInfo ? `<div class="formula" style="margin:6px 0">📋 من تقرير المخلّص (${esc(t.clearerInfo.at || '')}): ${[['رقم المعاملة', t.clearerInfo.consig], ['البيان الجمركي', t.clearerInfo.bayan], ['المنشأ', t.clearerInfo.origin], ['المنفذ', t.clearerInfo.port], ['وصول المنفذ', t.portEta], ['الحاويات', t.clearerInfo.qty], ['وكيل الملاحة', t.clearerInfo.agent], ['رسوم العمليات', t.clearerInfo.opsFee ? fmt(t.clearerInfo.opsFee, 2) : ''], ['الرسوم الجمركية', t.clearerInfo.duties ? fmt(t.clearerInfo.duties, 2) : ''], ['تم', (t.clearerInfo.flags || []).join('، ')]].filter(x => x[1]).map(x => `<b>${x[0]}:</b> ${esc(x[1])}`).join(' — ')}${(o.track || {}).clearerNote ? `<br><b>ملاحظة المخلّص:</b> ${esc(o.track.clearerNote)}` : ''}</div>` : ''}
       <div class="row-flex" style="margin:6px 0 10px">${trackPill(t)}<span class="small">عند ${esc(t.party || '—')} منذ ${esc(t.since || '—')}${t.daysIn != null ? ' (' + t.daysIn + ' يوم' + (t.stageDays ? ' من ' + t.stageDays : '') + ')' : ''}${tr.lastStatus ? ' — آخر حالة من المخلّص: «' + esc(tr.lastStatus) + '» ' + esc(tr.lastStatusAt || '') : ''}</span></div>
       <div class="form f4">
         <label class="f">الوكيل / مكتب الشحن<select id="t_fw" ${dis}><option value="">—</option>${fws.map(p => `<option value="${esc(p.id)}" ${tr.forwarder === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
@@ -1585,7 +1589,7 @@
     const p = i >= 0 ? db.parties[i] : null;
     const list = (p ? (p.statusMap = p.statusMap || []) : (db.trackStatusMap = db.trackStatusMap || []));
     const rows = list.map(x => Object.assign({}, x)).concat((preset || []).filter(t => !list.some(x => x.text === t)).map(t => ({ text: t, stage: '' })));
-    const row = (x, k) => `<tr><td><input data-mt="${k}" value="${esc(x.text)}" style="width:100%"></td><td><select data-ms="${k}"><option value="">— اختر —</option>${db.shipStages.map(s => `<option value="${esc(s.id)}" ${x.stage === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></td></tr>`;
+    const row = (x, k) => `<tr><td><input data-mt="${k}" value="${esc(x.text)}" style="width:100%"></td><td><select data-ms="${k}"><option value="">— اختر —</option><option value="__none" ${x.stage === '__none' ? 'selected' : ''}>— حالة محايدة (بدون تغيير المرحلة) —</option>${db.shipStages.map(s => `<option value="${esc(s.id)}" ${x.stage === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></td></tr>`;
     modal({
       title: 'تحويل الحالات — ' + (p ? esc(p.name) : 'عام لكل الجهات'),
       body: `<div class="hint">اكتب الحالة كما تجي في شيت ${p ? 'هذه الجهة' : 'المخلّص'} واختر مرحلتنا المقابلة. المطابقة تتجاهل الهمزات والتاء المربوطة.</div>
@@ -1600,6 +1604,52 @@
           m.qa('[data-mt]').forEach(inp => { const s = m.q(`[data-ms="${inp.dataset.mt}"]`).value; if (inp.value.trim() && s) out.push({ text: inp.value.trim(), stage: s }); });
           list.splice(0, list.length, ...out); log('تحديث تحويل الحالات ' + (p ? p.name : 'العام')); m.close(); commit();
           if (after) after();
+        };
+      }
+    });
+  }
+
+  // ---------- استيراد تقرير المخلّص كما هو (بيان المعاملات تحت التخليص) ----------
+  function clearerReportImport(wb, sheets) {
+    const recs = I.parseClearerReport(sheets, db);
+    if (!recs.length) return toast('ما لقيت معاملات في التقرير', 'bad');
+    const known = recs.filter(r => db.po.orders[r.poNo] || (r.blNo && Object.values(db.po.orders).some(o => o.blNo && o.blNo === r.blNo)));
+    const cls = (db.parties || []).filter(p => p.kind === 'clearer');
+    modal({
+      title: `تقرير المخلّص — ${esc(wb.name)}`, size: 'wide',
+      body: `<div class="banner ok"><span class="grow">تعرّفت على تقرير «بيان المعاملات تحت التخليص»: <b>${fmt(recs.length)}</b> معاملة، منها <b>${fmt(known.length)}</b> مطابقة لأوامرنا (برقم الأمر من الملاحظة أو البوليصة).</span></div>
+        <div class="form f4"><label class="f">المخلّص<select id="cr_party" class="inp"><option value="">— بدون —</option>${cls.map(p => `<option value="${esc(p.id)}" ${cls.length === 1 ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+        <div class="small full" style="margin-top:22px">الحالات تتحول لمراحلنا: NOT ARRIVED/On vessel ← تم الشحن، Arrived ← وصلت الميناء، تحصيل رسوم ← التخليص، جاري/قسم النقل ← خروج من الميناء، تم النقل ← وصول المستودع، إنتظار ← بدون تغيير. تتعدل من الإعدادات ← تحويل الحالات.</div></div>
+        <h3>معاينة</h3>
+        ${table('crPrev', [
+          { k: 'poNo', h: 'أمر الشراء', f: r => db.po.orders[r.poNo] ? `<b>${esc(r.poNo)}</b>` : `<span class="pill warn" title="مو موجود عندنا">${esc(r.poNo || '—')}</span>` },
+          { k: 'blNo', h: 'البوليصة' }, { k: 'containers', h: 'الحاويات', v: r => r.containers.join(' ') },
+          { k: 'statuses', h: 'الحالة', v: r => r.statuses.join(' — ') }, { k: 'portEta', h: 'وصول المنفذ' },
+          { k: 'note', h: 'ملاحظة المخلّص', cls: 'wrap', f: r => esc(r.note) + (r.extra.needTelex ? ' <span class="pill bad">مطلوب تلكس</span>' : '') }
+        ], recs, { static: true, short: true })}`,
+      foot: `<button class="primary" data-ok>تطبيق التحديث</button><button data-close>إلغاء</button>`,
+      onMount: m => {
+        m.q('[data-ok]').onclick = async () => {
+          await saveNow(); await api.snapshot('before-clearer-report');
+          const partyId = m.q('#cr_party').value;
+          m.close();
+          const run = () => {
+            const r = I.applyTrack(db, recs, { date: today(), user: ui.user.name, partyId, file: wb.name });
+            const msg = `تقرير المخلّص: ${fmt(recs.length)} معاملة — طابقت ${fmt(r.matched.length)} أمر — تقدمت مرحلته ${fmt(new Set(r.advanced).size)} — حاويات جديدة ${fmt(r.containersAdded)}`;
+            log(msg); ui.page = 'ship'; commit(); saveNow();
+            const un = Object.keys(r.unmapped);
+            const telex = r.matched.filter(no => (db.po.orders[no].track || {}).needTelex);
+            modal({
+              title: 'نتيجة تحديث المخلّص',
+              body: `<div class="banner ok">${esc(msg)}</div>
+                ${telex.length ? `<div class="banner bad">⚠ المخلّص ينتظر التلكس منّا في ${fmt(telex.length)} أمر: ${telex.map(esc).join('، ')}</div>` : ''}
+                ${r.notFound.length ? `<div class="banner warn">معاملات في التقرير لأوامر مو عندنا (${fmt(r.notFound.length)}): ${[...new Set(r.notFound)].map(esc).join('، ')} — استوردها من تقرير أوامر الشراء أو أضفها يدويًا.</div>` : ''}
+                ${un.length ? `<div class="banner warn">حالات ما لها مرحلة: ${un.map(t => `«${esc(t)}»`).join('، ')}</div>` : ''}`,
+              foot: `<button class="primary" data-close>تم</button>${un.length ? '<button data-map>تحديد مراحلها</button>' : ''}`,
+              onMount: mm => { const b = mm.q('[data-map]'); if (b) b.onclick = () => { mm.close(); statusMapModal((db.parties || []).findIndex(p => p.id === partyId), un, run); }; }
+            });
+          };
+          run();
         };
       }
     });
@@ -1820,6 +1870,7 @@
     if (!wb) return;
     const sheets = wb.sheets.filter(s => s.rows.length);
     if (!sheets.length) return toast('الملف فارغ', 'bad');
+    if (kind === 'track' && I.isClearerReport(sheets)) return clearerReportImport(wb, sheets);
     importWizard(kind, wb, sheets, mode);
   }
 
@@ -2304,7 +2355,7 @@
       else if (k === 'units_transit') { ui.dataTab = 'transit'; go('data'); }
       else if (k === 'po') { ui.poTab = 'orders'; go('po'); }
       else if (k === 'poLate') { ui.poTab = 'orders'; ui.f.po.status = 'late'; go('po'); }
-      else if (k === 'shipLate' || k === 'shipDem' || k === 'shipSoon') { Object.assign(ui.f.ship, { group: 'الكل', party: 'الكل', q: '', alert: { shipLate: 'متأخرة', shipDem: 'غرامة', shipSoon: 'قربت' }[k] }); go('ship'); }
+      else if (k === 'shipLate' || k === 'shipDem' || k === 'shipSoon' || k === 'shipTelex') { Object.assign(ui.f.ship, { group: 'الكل', party: 'الكل', q: '', alert: { shipLate: 'متأخرة', shipDem: 'غرامة', shipSoon: 'قربت', shipTelex: 'مطلوب تلكس' }[k] }); go('ship'); }
       else if (k === 'auto') reviewAuto();
       else if (k === 'noCost') { Object.assign(ui.f.items, { flag: 'بدون تكلفة', active: 'الكل', type: 'الكل', group: 'الكل', q: '' }); go('items'); }
       else if (k === 'unknownType') { Object.assign(ui.f.items, { flag: 'نوع غير معروف', active: 'الكل', type: 'الكل', group: 'الكل', q: '' }); go('items'); }

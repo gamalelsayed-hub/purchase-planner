@@ -411,6 +411,79 @@
     return res;
   }
 
+  // ---------- تقرير المخلّص (بيان المعاملات تحت التخليص — Crystal Reports) ----------
+  // كل معاملة: سطر مسلسل ← سطر بيانات (الحالة، المنشأ، المنفذ، التواريخ، الحاويات، الوكيل، البوليصة، رقم المعاملة)
+  // ← سطر ملاحظات (فيه رقم أمر الشراء غالبًا) + الحالة بالعربي + علامات (*). الأعمدة تتحرك، فنتعرف على كل قيمة من شكلها.
+  const CONT_RE = /[A-Za-z]{4}\s?\d{6,7}/g;
+  const isSerialDate = v => typeof v === 'number' && v > 40000 && v < 60000;
+  const serialToIso = v => new Date(Math.round((v - 25569) * 86400000)).toISOString().slice(0, 10);
+  function isClearerReport(sheets) {
+    return sheets.some(sh => sh.rows.slice(0, 40).some(r => { const t = norm((r || []).join(' ')); return t.includes(norm('رقم البوليصه')) && t.includes(norm('رقم الحاوية')); }));
+  }
+  function parseClearerReport(sheets, db) {
+    const sh = sheets.find(s => s.rows.slice(0, 40).some(r => norm((r || []).join(' ')).includes(norm('رقم الحاوية'))));
+    const rows = sh.rows;
+    const hdrIdx = rows.findIndex(r => norm((r || []).join(' ')).includes(norm('رقم الحاوية')));
+    // عناوين علامات (*) مثل: موانى، ربط، تسليم، شحن
+    const flagRow = rows.slice(hdrIdx, hdrIdx + 4).find(r => (r || []).some(v => /ربط|تسليم/.test(String(v || ''))));
+    const flagHdr = flagRow ? flagRow.map((v, c) => v ? { c, t: String(v).trim() } : null).filter(Boolean) : [];
+    const known = new Set(Object.keys((db.po && db.po.orders) || {}));
+    const cells = r => (r || []).map((v, c) => (v == null || v === '' || String(v).trim() === '') ? null : { c, v: typeof v === 'string' ? v.trim() : v }).filter(Boolean);
+    const out = [];
+    for (let i = hdrIdx + 1; i < rows.length; i++) {
+      const cs = cells(rows[i]);
+      if (cs.length < 6 || !cs.some(x => isSerialDate(x.v))) continue; // سطر بيانات معاملة
+      if (cs.some(x => /الإجمالي|الاجمالي|القائم\s*بالطباع|تاريخ\s*الطباعة|رقم\s*الصفحة|page\s*\d|total/i.test(String(x.v)))) continue; // التذييل والإجماليات
+      const rec = { containers: [], statuses: [], extra: {} };
+      const contCell = cs.find(x => typeof x.v === 'string' && CONT_RE.test(x.v)); CONT_RE.lastIndex = 0;
+      if (contCell) rec.containers = (contCell.v.match(CONT_RE) || []).map(x => x.replace(/\s+/g, '').toUpperCase());
+      const cc = contCell ? contCell.c : 34;
+      const latin = cs.filter(x => typeof x.v === 'string' && /^[A-Za-z][A-Za-z .]*$/.test(x.v));
+      const st = latin.find(x => x.c < cc - 4); if (st) rec.statuses.push(st.v);
+      const ag = latin.find(x => x.c > cc && x.c < cc + 8 && x !== st); if (ag) rec.extra.agent = ag.v;
+      const bl = cs.find(x => typeof x.v === 'string' && x.c > cc && /\d/.test(x.v) && /[A-Za-z]/.test(x.v) && !/^\d+\s*x\s*\d+/i.test(x.v) && x !== contCell && !CONT_RE.test(x.v)); CONT_RE.lastIndex = 0;
+      if (bl) rec.blNo = bl.v;
+      const dates = cs.filter(x => isSerialDate(x.v)).map(x => serialToIso(x.v));
+      if (dates[0]) rec.portEta = dates[0];
+      if (dates[1]) rec.extra.secondDate = dates[1];
+      const qty = cs.find(x => typeof x.v === 'string' && /\d+\s*x\s*\d+/i.test(x.v)); if (qty) rec.extra.qty = qty.v;
+      const ar = cs.filter(x => typeof x.v === 'string' && /[؀-ۿ]/.test(x.v) && x.c < cc);
+      const port = ar.find(x => /ميناء|منفذ|مطار/.test(x.v)); if (port) rec.extra.port = port.v;
+      const origin = ar.find(x => x !== port); if (origin) rec.extra.origin = origin.v;
+      const bayan = cs.find(x => x.c < cc && x.c > (st ? st.c : 0) && /^\d{5,9}$/.test(String(x.v)) && !isSerialDate(x.v)); if (bayan) rec.extra.bayan = String(bayan.v);
+      const nums = cs.filter(x => typeof x.v === 'number' && !isSerialDate(x.v));
+      const fees = nums.filter(x => x.c < (st ? st.c : 20)); if (fees[0]) rec.extra.opsFee = fees[0].v; if (fees[1]) rec.extra.duties = fees[1].v;
+      const consig = nums.filter(x => x.c > cc).pop(); if (consig) rec.extra.consig = String(consig.v);
+      // أسطر الملاحظات والحالة بالعربي والعلامات حتى المعاملة التالية
+      const notes = [], flags = [];
+      for (let j = i + 1; j < rows.length; j++) {
+        const ns = cells(rows[j]);
+        if (ns.some(x => /الإجمالي|الاجمالي|القائم\s*بالطباع|تاريخ\s*الطباعة|رقم\s*الصفحة|page\s*\d|total/i.test(String(x.v)))) break;
+        if (ns.some(x => isSerialDate(x.v)) && ns.length >= 6) break;
+        if (ns.length === 1 && typeof ns[0].v === 'number') break; // مسلسل المعاملة التالية
+        for (const x of ns) {
+          if (x.v === '*') { const h = flagHdr.reduce((b, f) => !b || Math.abs(f.c - x.c) < Math.abs(b.c - x.c) ? f : b, null); flags.push(h ? h.t : '*'); }
+          else if (typeof x.v === 'string' && x.c >= 12 && /^[؀-ۿ ]+$/.test(x.v)) rec.statuses.push(x.v);
+          else if (typeof x.v === 'string' && x.c < 12) notes.push(x.v);
+        }
+      }
+      rec.note = notes.join(' ');
+      rec.extra.flags = [...new Set(flags)];
+      rec.extra.needTelex = /need+\s*telex/i.test(rec.note) && !/تم\s*ارسال\s*التلكس/.test(rec.note);
+      // رقم أمر الشراء من الملاحظة: الأرقام الموجودة عندنا أولًا
+      const ns2 = (rec.note.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).match(/\d{4,7}/g) || []);
+      rec.poNo = ns2.find(n => known.has(n)) || ns2[0] || '';
+      out.push(rec);
+    }
+    return out;
+  }
+  // حالات المخلّص الافتراضية ← مراحلنا (تتعدل من الإعدادات). «__none» = حالة محايدة ما تغيّر المرحلة
+  const DEFAULT_CLEARER_MAP = [
+    { text: 'NOT ARRIVED', stage: 'shipped' }, { text: 'On vessel', stage: 'shipped' }, { text: 'Arrived', stage: 'port' },
+    { text: 'إنتظار', stage: '__none' }, { text: 'تحصيل رسوم', stage: 'customs' }, { text: 'قسم النقل', stage: 'released' },
+    { text: 'جاري النقل', stage: 'released' }, { text: 'تم النقل', stage: 'warehouse' }
+  ];
+
   // ---------- تحديث المخلّص / الوكيل (المتابعة الخارجية) ----------
   // المطابقة: رقم الأمر ← رقم البوليصة ← رقم الحاوية. الحالة تتحول لمرحلة من جدول تحويل الجهة ثم الجدول العام.
   function mapTrackStatus(db, text, partyId) {
@@ -418,6 +491,8 @@
     const party = (db.parties || []).find(p => p.id === partyId);
     const maps = [].concat((party && party.statusMap) || [], db.trackStatusMap || []);
     for (const m of maps) if (m.text && m.stage && norm(m.text) === t) return m.stage;
+    // الحالات الافتراضية لتقارير المخلّص (إذا ما عُرّفت في الجداول)
+    for (const m of DEFAULT_CLEARER_MAP) if (norm(m.text) === t && !maps.some(x => norm(x.text) === t)) return m.stage;
     for (const m of maps) if (m.text && m.stage && (t.includes(norm(m.text)) || norm(m.text).includes(t))) return m.stage;
     // اسم المرحلة نفسه
     const st = (db.shipStages || []).find(x => norm(x.name) === t || norm(x.id) === t);
@@ -433,32 +508,51 @@
     for (const r of recs) {
       res.rows++;
       const cn = String(r.containerNo || '').trim().toUpperCase();
+      const conts = (r.containers && r.containers.length ? r.containers : (cn ? [cn] : [])).map(x => String(x).replace(/\s+/g, '').toUpperCase());
       const o = (r.poNo && po.orders[r.poNo]) || (r.blNo && orders.find(x => x.blNo && norm(x.blNo) === norm(r.blNo))) ||
-        (cn && orders.find(x => ((x.track || {}).containers || []).some(c => c.no === cn)));
-      if (!o) { res.notFound.push(r.poNo || r.blNo || cn || '?'); continue; }
+        (conts.length && orders.find(x => ((x.track || {}).containers || []).some(c => conts.includes(c.no))));
+      if (!o) { res.notFound.push(r.poNo || r.blNo || conts[0] || '?'); continue; }
       res.matched.add(o.no);
       o.track = o.track || { history: [], containers: [] };
       o.track.containers = o.track.containers || [];
       if (r.blNo && !o.blNo) o.blNo = String(r.blNo).trim();
       if (partyId && !o.track.clearer) o.track.clearer = partyId;
-      if (cn) {
-        let c = o.track.containers.find(x => x.no === cn);
-        if (!c) { c = { no: cn }; o.track.containers.push(c); res.containersAdded++; }
+      for (const no of conts) {
+        let c = o.track.containers.find(x => x.no === no);
+        if (!c) { c = { no }; o.track.containers.push(c); res.containersAdded++; }
         const pd = toDate(r.portDate); if (pd) c.portAt = pd;
         const wd = toDate(r.warehouseDate); if (wd) c.warehouseAt = wd;
         const ed = toDate(r.emptyDate); if (ed) c.emptyAt = ed;
-      } else {
-        const pd = toDate(r.portDate); if (pd) o.track.portAt = pd;
       }
-      if (r.status != null && String(r.status).trim()) {
-        const txt = String(r.status).trim();
-        o.track.lastStatus = txt; o.track.lastStatusAt = toDate(r.statusDate) || day;
-        const sid = mapTrackStatus(db, txt, partyId || o.track.clearer);
-        if (!sid) { res.unmapped[txt] = (res.unmapped[txt] || 0) + 1; continue; }
-        const cur = E.trackStageIndex(db, o), nxt = stageIdx(sid);
-        if (nxt > cur || (allowBack && nxt !== cur)) {
-          E.setTrackStage(db, o, sid, { date: toDate(r.statusDate) || day, by: user || '', note: txt + (r.note ? ' — ' + r.note : ''), source: 'sheet' });
-          res.advanced.push(o.no);
+      if (!conts.length) { const pd = toDate(r.portDate); if (pd) o.track.portAt = pd; }
+      if (r.portEta) o.track.portEta = r.portEta; // الوصول المتوقع للميناء من المخلّص
+      if (r.extra) { o.track.clearerInfo = Object.assign({}, o.track.clearerInfo || {}, r.extra, { at: day }); o.track.needTelex = !!r.extra.needTelex; }
+      if (r.note != null && r.extra) o.track.clearerNote = r.note;
+      const texts = (r.statuses && r.statuses.length ? r.statuses : [r.status]).filter(x => x != null && String(x).trim()).map(x => String(x).trim());
+      if (texts.length) {
+        o.track.lastStatus = texts.join(' — ') + (r.note && r.extra ? ' — ' + r.note : ''); o.track.lastStatusAt = toDate(r.statusDate) || day;
+        // أبعد مرحلة من كل الحالات، والحالة المحايدة («__none») ما تغيّر شي
+        let best = '', bestI = -1;
+        for (const txt of texts) {
+          const sid = mapTrackStatus(db, txt, partyId || o.track.clearer);
+          if (!sid) { res.unmapped[txt] = (res.unmapped[txt] || 0) + 1; continue; }
+          if (sid === '__none') continue;
+          const k = stageIdx(sid); if (k > bestI) { bestI = k; best = sid; }
+        }
+        if (best) {
+          const cur = E.trackStageIndex(db, o);
+          if (bestI > cur || (allowBack && bestI !== cur)) {
+            const st = db.shipStages[bestI];
+            const when = st.marks === 'port' && r.portEta && r.extra ? r.portEta : (toDate(r.statusDate) || day);
+            E.setTrackStage(db, o, best, { date: when, by: user || '', note: o.track.lastStatus, source: 'sheet' });
+            res.advanced.push(o.no);
+          }
+          // وصلت الميناء أو بعدها (مثل «Arrived» + «تحصيل رسوم»): تاريخ الوصول من التقرير — منه تبدأ أيام السماح
+          const portI = (db.shipStages || []).findIndex(x => x.marks === 'port');
+          if (r.portEta && r.extra && portI >= 0 && bestI >= portI) {
+            o.track.portAt = r.portEta;
+            for (const c of o.track.containers) if (conts.includes(c.no) && !c.portAt) c.portAt = r.portEta;
+          }
         }
       }
     }
@@ -574,7 +668,7 @@
     if (/يورو|eur/i.test(t)) return 'EUR';
     return '';
   }
-  const Importers = { applyTrack, mapTrackStatus, currencyFromHeader, KINDS, applyPOs, applyPOPay, toDate, curCode, detectHeader, rowsToRecords, applyItems, applySales, applyStock, applyTransit, autoAddItems, importLegacy, isLegacyWorkbook, syncGroups, parseActive };
+  const Importers = { isClearerReport, parseClearerReport, DEFAULT_CLEARER_MAP, applyTrack, mapTrackStatus, currencyFromHeader, KINDS, applyPOs, applyPOPay, toDate, curCode, detectHeader, rowsToRecords, applyItems, applySales, applyStock, applyTransit, autoAddItems, importLegacy, isLegacyWorkbook, syncGroups, parseActive };
   if (typeof module !== 'undefined' && module.exports) module.exports = Importers;
   else root.Importers = Importers;
 })(typeof window !== 'undefined' ? window : globalThis);

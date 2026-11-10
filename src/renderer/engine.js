@@ -391,6 +391,7 @@
       ...(() => { const ts = trackSummary(db).filter(t => !t.closed); return [
         { id: 'trackLate', title: 'معاملات خارجية متأخرة في مرحلتها (عدّت المدة المتوقعة)', count: ts.filter(t => t.late && (t.status === 'open' || t.containersOpen)).length, sev: 'w', where: 'المعاملات الخارجية ← فلتر «متأخرة»', why: 'تابع مع الجهة المسؤولة عن المرحلة' },
         { id: 'demurrage', title: 'حاويات تجاوزت أيام السماح (غرامة تأخير)', count: ts.reduce((a, t) => a + t.containers.filter(c => c.overdue).length, 0), sev: 'x', where: 'المعاملات الخارجية ← الحاويات', why: 'كل يوم تأخير عليه غرامة من الوكيل — سلّم الحاوية فارغة' },
+        { id: 'needTelex', title: 'معاملات ينتظر فيها المخلّص التلكس منّا (NEED TELEX)', count: ts.filter(t => t.needTelex).length, sev: 'w', where: 'المعاملات الخارجية ← فلتر «مطلوب تلكس»', why: 'الشحنة ما تتخلّص بدون التلكس — أرسله للمخلّص' },
         { id: 'demurrageSoon', title: 'حاويات قربت تنتهي أيام السماح', count: ts.reduce((a, t) => a + t.containers.filter(c => c.soon).length, 0), sev: 'w', where: 'المعاملات الخارجية ← الحاويات', why: 'سلّمها فارغة قبل الموعد' }
       ]; })(),
       { id: 'poShipLate', title: 'أوامر صادرة تأخر شحنها (عدّت مدة التجهيز بدون بوليصة)', count: poSummary(db).filter(o => o.shipLate).length, sev: 'w', where: 'أوامر الشراء ← فلتر «تأخر الشحن»', why: 'تابع مع المورد، أو علّمه «تم الشحن» إذا صدرت البوليصة' },
@@ -599,7 +600,11 @@
       const late = stage.days !== '' && stage.days != null && num(stage.days) > 0 && daysIn != null && daysIn > num(stage.days) && !t.closed;
       // الوصول المتوقع من المراحل: تاريخ دخول المرحلة الحالية + مدد المراحل الباقية حتى المستودع
       let etaStages = '';
-      if (t.stage && since && recvIdx > idx) {
+      if (t.portEta && portIdx >= 0 && idx < portIdx && recvIdx > portIdx) {
+        // المخلّص أعطى وصول الميناء المتوقع ← + مدد المراحل من الميناء حتى المستودع
+        let sum = 0; for (let k = portIdx; k < recvIdx; k++) sum += num(st[k].days);
+        etaStages = addDaysDate(t.portEta, sum);
+      } else if (t.stage && since && recvIdx > idx) {
         let sum = Math.max(num(stage.days), daysIn || 0);
         for (let k = idx + 1; k < recvIdx; k++) sum += num(st[k].days);
         etaStages = addDaysDate(since, sum);
@@ -621,7 +626,7 @@
         forwarder: fw ? fw.name : '', clearer: (partyById(db, t.clearer) || {}).name || '', docType: t.docType || '', blNo: o.blNo || '',
         containers, containersOpen: openCont.length, freeDays, demurrageLeft: isFinite(minLeft) ? minLeft : null,
         demurrageOverdue: openCont.some(c => c.overdue), demurrageSoon: !openCont.some(c => c.overdue) && openCont.some(c => c.soon),
-        etaStages, history: t.history || [], supplier: o.supplier || '', status: o.status, foreign: !!(o.track || (o.currency && o.currency !== ((db.currencies || [])[0] || {}).code))
+        etaStages, portEta: t.portEta || '', needTelex: !!t.needTelex && !t.closed && o.status === 'open', lastStatus: t.lastStatus || '', clearerInfo: t.clearerInfo || null, history: t.history || [], supplier: o.supplier || '', status: o.status, foreign: !!(o.track || (o.currency && o.currency !== ((db.currencies || [])[0] || {}).code))
       };
     });
   }

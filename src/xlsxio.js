@@ -16,7 +16,23 @@ function cellValue(v) {
 }
 
 // يرجع { sheets: [{ name, rows: [[...], ...] }] }
+// ملفات Excel القديمة (.xls) — مثل تقارير Crystal Reports من أنظمة المخلّصين
+function readXls(filePath, opts = {}) {
+  const XLSX = require('@e965/xlsx');
+  const wb = XLSX.read(require('fs').readFileSync(filePath), { type: 'buffer', cellDates: false });
+  const sheets = [];
+  for (const name of wb.SheetNames) {
+    if (opts.only && !opts.only.includes(name)) continue;
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: null, blankrows: true });
+    for (const r of rows) while (r.length && (r[r.length - 1] == null || r[r.length - 1] === '')) r.pop();
+    while (rows.length && !rows[rows.length - 1].length) rows.pop();
+    sheets.push({ name, rows });
+  }
+  return { sheets };
+}
+
 async function readWorkbook(filePath, opts = {}) {
+  if (/\.xls$/i.test(filePath)) return readXls(filePath, opts);
   const maxRows = opts.maxRows || 200000;
   const wb = new ExcelJS.Workbook();
   if (/\.csv$/i.test(filePath)) await wb.csv.readFile(filePath);

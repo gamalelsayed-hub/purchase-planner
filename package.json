@@ -40,6 +40,7 @@
     "publish": null
   },
   "devDependencies": {
+    "@e965/xlsx": "^0.20.3",
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8",
     "esbuild": "^0.24.0",

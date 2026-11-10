@@ -205,4 +205,40 @@ assert.ok(db.po.orders.K1.shipped, 'reaching port implies shipped');
 I.applyTrack(db, [{ containerNo: 'MSKU1', emptyDate: '2026-09-20' }, { containerNo: 'MSKU2', emptyDate: '2026-09-21' }], { date: '2026-09-21' });
 assert.strictEqual(db.po.orders.K1.track.stage, 'emptyReturned'); assert.ok(db.po.orders.K1.track.closed);
 
+// تقرير المخلّص بشكل Crystal Reports (بيانات وهمية): مسلسل ← بيانات ← ملاحظات، والأعمدة تتحرك
+{
+  const row = (pairs) => { const r = []; for (const [c, v] of pairs) r[c] = v; return r; };
+  const rows = [
+    row([[8, 'بيان المعاملات تحت التخليص']]),
+    row([[18, 'الحالة '], [34, 'رقم الحاوية'], [37, 'الوكيل'], [43, 'رقم البوليصه'], [56, 'رقم المعامله'], [58, 'مسلسل']]),
+    row([[1, 'موانى '], [2, 'ربط'], [4, 'تسليم'], [5, 'شحن'], [6, 'الملاحظات']]),
+    row([[58, 1]]),
+    row([[10, 0], [15, 0], [21, 'NOT ARRIVED'], [23, 'الصين'], [26, 'ميناء جدة الإسلامي'], [28, 46340], [34, 'ABCU 1234567|ABCU 7654321'], [37, 'Fast'], [41, '20x2 - جاف'], [44, 'BLX12345'], [56, 501]]),
+    row([[6, 'NEED TELEX - 90009'], [18, 'إنتظار']]),
+    row([[58, 2]]),
+    row([[10, 1500.5], [15, 300], [21, 'Arrived'], [23, 'الهند'], [26, 'ميناء جدة الإسلامي'], [28, 46333], [32, '1082286'], [34, 'XYZU 1111111'], [37, 'Slow'], [41, '20x1 - جاف'], [42, 'BLY999'], [56, 502]]),
+    row([[2, '*'], [4, '*'], [6, 'الشيك مع الوكيل- 90008'], [18, 'تحصيل رسوم']]),
+    row([[10, 1500.5], [22, 'الإجمالي ']]),
+    row([[0, '4Link ERP'], [25, ' :القائم بالطباعه'], [51, 46336]])
+  ];
+  const cdb = baseDb();
+  I.applyPOs(cdb, [{ poNo: '90009', code: 'A1', unit: 'كرتون', qty: 1, value: 1 }, { poNo: '90008', code: 'B1', unit: 'حبه', qty: 1, value: 1 }].map(x => Object.assign(x, { invQty: 0 })), { date: '2026-11-01' });
+  const sheets = [{ name: 'Sheet1', rows }];
+  assert.ok(I.isClearerReport(sheets));
+  const recs = I.parseClearerReport(sheets, cdb);
+  assert.strictEqual(recs.length, 2, 'footer and totals skipped');
+  assert.deepStrictEqual(recs[0].containers, ['ABCU1234567', 'ABCU7654321']); assert.strictEqual(recs[0].blNo, 'BLX12345');
+  assert.strictEqual(recs[0].poNo, '90009'); assert.ok(recs[0].extra.needTelex); assert.strictEqual(recs[0].portEta, '2026-11-14');
+  assert.deepStrictEqual(recs[1].statuses, ['Arrived', 'تحصيل رسوم']); assert.strictEqual(recs[1].extra.bayan, '1082286');
+  assert.strictEqual(recs[1].extra.opsFee, 1500.5); assert.deepStrictEqual(recs[1].extra.flags, ['ربط', 'تسليم']);
+  const rr2 = I.applyTrack(cdb, recs, { date: '2026-11-10' });
+  assert.deepStrictEqual(rr2.matched.sort(), ['90008', '90009']); assert.deepStrictEqual(rr2.unmapped, {});
+  const z8 = E.trackSummary(cdb, '2026-11-10').find(t => t.no === '90008'), z9 = E.trackSummary(cdb, '2026-11-10').find(t => t.no === '90009');
+  assert.strictEqual(z8.stageId, 'customs', 'furthest of Arrived + تحصيل رسوم'); assert.strictEqual(z8.containers[0].portAt, '2026-11-07');
+  assert.strictEqual(z8.containers[0].deadline, '2026-11-21');
+  assert.strictEqual(z9.stageId, 'shipped'); assert.ok(z9.needTelex);
+  // وصول الميناء المتوقع من المخلّص (14/11) + مدد الميناء والتخليص والخروج (3+5+2) = 24/11
+  assert.strictEqual(z9.etaStages, '2026-11-24');
+}
+
 console.log('✓ all engine unit tests passed');
