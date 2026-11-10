@@ -238,6 +238,18 @@
     if (t.page >= pages) t.page = pages - 1;
     const start = size === Infinity ? 0 : t.page * size;
     const slice = data.slice(start, start + size);
+    // خانات التحديد (للتعديل الجماعي): «تحديد الكل» = كل الأسطر المعروضة بعد الفلترة (كل الصفحات)
+    let bulkBar = '';
+    if (o.select && !ui.printing) {
+      ui.sel = ui.sel || {}; ui.selFn = ui.selFn || {};
+      const sel = ui.sel[id] || (ui.sel[id] = new Set());
+      ui.selFn[id] = o.select;
+      const keys = data.map(o.select);
+      const allSel = keys.length > 0 && keys.every(k => sel.has(k));
+      const visSel = keys.filter(k => sel.has(k)).length;
+      cols = [{ k: '_sel', nosort: true, h: `<input type="checkbox" data-selall="${id}" ${allSel ? 'checked' : ''} title="تحديد كل المعروض (${fmt(keys.length)})">`, f: r => `<input type="checkbox" data-sel="${id}" data-key="${esc(o.select(r))}" ${sel.has(o.select(r)) ? 'checked' : ''}>` }].concat(cols);
+      if (sel.size) bulkBar = `<div class="banner brand no-print bulkbar"><span class="grow">✔ <b>${fmt(sel.size)}</b> محدد${visSel !== sel.size ? ` (المعروض منها ${fmt(visSel)})` : ''}</span>${o.bulk ? `<button class="sm primary" data-act="${o.bulk}" data-t="${id}">تعديل جماعي للمحدد</button>` : ''}<button class="sm" data-act="selAllVisible" data-t="${id}">تحديد كل المعروض (${fmt(keys.length)})</button><button class="sm" data-act="selClear" data-t="${id}">إلغاء التحديد</button></div>`;
+    }
     const fRow = canFilter ? `<tr class="frow no-print">${cols.map(c => `<th>${filterable(c) ? `<input id="flt_${id}_${c.k}" data-colf="${id}" data-k="${c.k}" value="${esc(t.filters[c.k] || '')}" placeholder="${c.n ? '>0' : 'فلتر'}" title="${c.n ? 'رقم: 100 أو >100 أو <5 أو >=1 أو 10..50' : 'نص يحتوي — اكتب !نص للاستبعاد، = للمطابقة التامة، أو (فارغ)'}">` : ''}</th>`).join('')}</tr>` : '';
     const clearBtn = active.length ? `<button class="sm" data-act="clearColF" data-t="${id}">مسح فلاتر الأعمدة (${active.length})</button> ` : '';
     const head = cols.map(c => `<th class="${c.n ? 'n' : ''} ${c.nosort ? '' : 'sortable'}" ${c.nosort ? '' : `data-act="sort" data-t="${id}" data-k="${c.k}"`} ${c.title ? `title="${esc(c.title)}"` : ''}>${c.h}${t.sort === c.k ? (t.dir > 0 ? ' ▲' : ' ▼') : ''}</th>`).join('');
@@ -254,7 +266,7 @@
       <button class="sm" data-act="page" data-t="${id}" data-p="${pages - 1}" ${t.page >= pages - 1 ? 'disabled' : ''}>الأخير</button></div>` : (data.length ? `<div class="pager no-print">${fmt(data.length)} سطر</div>` : '');
     const empty = !data.length ? `<div class="empty">${o.empty || 'لا توجد بيانات'}</div>` : '';
     if (clearBtn && !pager) { /* */ }
-    return `${clearBtn ? `<div class="toolbar no-print" style="margin:0 0 6px">${clearBtn}<span class="small">${fmt(data.length)} من ${fmt(rows.length)} سطر</span></div>` : ''}<div class="tbl-wrap ${o.short ? 'short' : ''}"><table class="t"><thead><tr>${head}</tr>${fRow}</thead><tbody>${body}</tbody>${foot}</table>${empty}</div>${pager}`;
+    return `${bulkBar}${clearBtn ? `<div class="toolbar no-print" style="margin:0 0 6px">${clearBtn}<span class="small">${fmt(data.length)} من ${fmt(rows.length)} سطر</span></div>` : ''}<div class="tbl-wrap ${o.short ? 'short' : ''}"><table class="t"><thead><tr>${head}</tr>${fRow}</thead><tbody>${body}</tbody>${foot}</table>${empty}</div>${pager}`;
   }
 
   function colFiltered(id, cols, rows) {
@@ -264,7 +276,7 @@
       .map(([k, v]) => ({ get: colValue(cols.find(c => c.k === k)), test: makeTest(v) }));
     return tests.length ? rows.filter(r => tests.every(x => x.test(x.get(r)))) : rows;
   }
-  const NOFILTER = ['idx', 'i', 'act', 'del', 'fix', 'go', 'chk', 'delta', 'reason', 'ok'];
+  const NOFILTER = ['_sel', 'idx', 'i', 'act', 'del', 'fix', 'go', 'chk', 'delta', 'reason', 'ok'];
   function colValue(col) {
     if (col.v) return col.v;
     if (col.k === 'active') return r => r.active !== false ? 'يعمل' : 'لا يعمل';
@@ -1221,7 +1233,7 @@
       { k: 'totalSar', h: 'الإجمالي ' + cur(), n: true }, { k: 'paidSar', h: 'المدفوع', n: true }, { k: 'dueSar', h: 'المتبقي للسداد', n: true, f: o => `<b>${money(o.dueSar)}</b>` },
       { k: 'payStatus', h: 'السداد', f: o => payPill(o.payStatus) },
       { k: 'eta', h: 'الوصول المتوقع', f: etaCell }, { k: 'firstSeen', h: 'أول ظهور' }, { k: 'note', h: 'ملاحظة', cls: 'wrap' }
-    ], rows, { sort: 'eta', dir: 1, onRow: o => poModal(o.no), empty: 'لا توجد أوامر — استورد تقرير أوامر الشراء أو شيت السداد', foot: { no: 'الإجمالي', totalSar: money(sum('totalSar')), paidSar: money(sum('paidSar')), dueSar: money(sum('dueSar')) } })}`;
+    ], rows, { sort: 'eta', dir: 1, select: o => o.no, bulk: 'bulkPo', onRow: o => poModal(o.no), empty: 'لا توجد أوامر — استورد تقرير أوامر الشراء أو شيت السداد', foot: { no: 'الإجمالي', totalSar: money(sum('totalSar')), paidSar: money(sum('paidSar')), dueSar: money(sum('dueSar')) } })}`;
   }
   function poCash(all) {
     const H = ui.f.cash.horizon !== '' ? num(ui.f.cash.horizon) : (num(db.settings.cashHorizonDays) || 60);
@@ -1466,7 +1478,7 @@
         { k: 'containers', h: 'الحاويات', v: t => t.containers.map(c => c.no).join(' '), f: t => t.containers.length ? `${fmt(t.containers.length)} <span class="small">(${fmt(t.containersOpen)} لم تُسلّم)</span>` : '' },
         { k: 'demurrageLeft', h: 'أيام السماح', n: true, f: demCell },
         { k: 'eta', h: 'الوصول المتوقع' }, { k: 'dueSar', h: 'المتبقي للسداد', n: true }
-      ], rows, { sort: 'stageIdx', dir: 1, onRow: t => poModal(t.no), empty: 'لا توجد معاملات خارجية بهذه الفلاتر' })}`;
+      ], rows, { sort: 'stageIdx', dir: 1, select: t => t.no, bulk: 'bulkPo', onRow: t => poModal(t.no), empty: 'لا توجد معاملات خارجية بهذه الفلاتر' })}`;
   };
 
   // قسم المتابعة داخل شاشة أمر الشراء
@@ -1588,6 +1600,97 @@
           m.qa('[data-mt]').forEach(inp => { const s = m.q(`[data-ms="${inp.dataset.mt}"]`).value; if (inp.value.trim() && s) out.push({ text: inp.value.trim(), stage: s }); });
           list.splice(0, list.length, ...out); log('تحديث تحويل الحالات ' + (p ? p.name : 'العام')); m.close(); commit();
           if (after) after();
+        };
+      }
+    });
+  }
+
+  // ---------- التعديل الجماعي لأوامر الشراء ----------
+  function bulkPoModal(tableId) {
+    const nos = [...(ui.sel[tableId] || [])].filter(no => db.po.orders[no]);
+    if (!nos.length) return toast('ما فيه أوامر محددة', 'bad');
+    const cS = can('shipping'), cI = can('po_import'), cP = can('po_payments');
+    if (!cS && !cI && !cP) return deny('po_import');
+    const fws = (db.parties || []).filter(p => p.kind === 'forwarder'), cls = (db.parties || []).filter(p => p.kind === 'clearer');
+    const keep = '<option value="">— بدون تغيير —</option>';
+    const sec = (ok, html) => ok ? html : '';
+    modal({
+      title: `تعديل جماعي — ${fmt(nos.length)} أمر`, size: 'wide',
+      body: `<div class="hint">الخانة الفاضية ما تتغير. التعديل ينطبق على: ${nos.slice(0, 25).map(esc).join('، ')}${nos.length > 25 ? ' …' : ''}</div>
+        ${sec(cS, `<h3>المتابعة الخارجية</h3><div class="form f4">
+          <label class="f">نقل إلى مرحلة<select id="b_stage">${keep}${(db.shipStages || []).map((x, i) => `<option value="${esc(x.id)}">${i + 1}. ${esc(x.name)}</option>`).join('')}</select></label>
+          <label class="f">تاريخ المرحلة<input id="b_sdate" type="date" value="${today()}"></label>
+          <label class="f">ملاحظة المرحلة<input id="b_snote"></label>
+          <label class="chk" style="margin-top:22px"><input type="checkbox" id="b_back"> اسمح بالرجوع لمرحلة سابقة</label>
+          <label class="f">الوكيل / مكتب الشحن<select id="b_fw">${keep}<option value="__clear">— مسح —</option>${fws.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label>
+          <label class="f">المخلّص الجمركي<select id="b_cl">${keep}<option value="__clear">— مسح —</option>${cls.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label>
+          <label class="f">نوع مستند الشحن<select id="b_doc">${keep}<option>بوليصة</option><option>تلكس</option></select></label>
+          <label class="f">أيام السماح للحاوية<input id="b_free" type="number" step="1" min="0" placeholder="بدون تغيير"></label>
+        </div>`)}
+        ${sec(cI || cP, `<h3>الحالة والتواريخ</h3><div class="form f4">
+          <label class="f">الحالة<select id="b_status">${keep}<option value="shipped">🚢 تم الشحن</option><option value="received">وصل المخزون</option><option value="open">إعادة فتح (لم يصل)</option><option value="unship">إلغاء «تم الشحن»</option></select></label>
+          <label class="f">تاريخ الشحن<input id="b_shipdate" type="date"></label>
+          <label class="f">الوصول المتوقع<input id="b_eta" type="date"></label>
+          <label class="chk" style="margin-top:22px"><input type="checkbox" id="b_etaauto"> إرجاع الوصول المتوقع للتلقائي</label>
+        </div>`)}
+        ${sec(cP, `<h3>المورد والسداد</h3><div class="form f4">
+          <label class="f">المورد<input id="b_sup" placeholder="بدون تغيير"></label>
+          <label class="f">المخلّص (اسم)<input id="b_agent" placeholder="بدون تغيير"></label>
+          <label class="f">العملة<select id="b_cur">${keep}${db.currencies.map(c => `<option value="${esc(c.code)}">${esc(c.name)}</option>`).join('')}</select></label>
+          <label class="chk" style="margin-top:22px"><input type="checkbox" id="b_payall"> سداد المتبقي بالكامل لكل أمر</label>
+          <label class="f">تاريخ السداد<input id="b_paydate" type="date" value="${today()}"></label>
+          <label class="f full">ملاحظة السداد<input id="b_paynote"></label>
+        </div>`)}`,
+      foot: `<button class="primary" data-ok>تطبيق على ${fmt(nos.length)} أمر</button><button data-close>إلغاء</button>`,
+      onMount: m => {
+        const v = sel => { const x = m.q(sel); return x ? (x.type === 'checkbox' ? x.checked : x.value) : ''; };
+        m.q('[data-ok]').onclick = async () => {
+          const stage = v('#b_stage'), status = v('#b_status'), payall = v('#b_payall');
+          if (status === 'received' && !await confirmBox(`تعليم ${fmt(nos.length)} أمر «وصل المخزون»؟ كمياتها تنشال من البضاعة بالطريق.`, { ok: 'تطبيق' })) return;
+          if (payall && !await confirmBox(`تسجيل سداد المتبقي بالكامل لـ ${fmt(nos.length)} أمر؟`, { ok: 'تسجيل السداد' })) return;
+          await saveNow(); await api.snapshot('before-bulk-po');
+          let changed = 0;
+          const sum = new Map(E.poSummary(db, today()).map(x => [x.no, x]));
+          for (const no of nos) {
+            const o = db.po.orders[no]; let ch = false;
+            if (cS) {
+              o.track = o.track || { history: [], containers: [] };
+              const fw = v('#b_fw'), cl = v('#b_cl'), doc = v('#b_doc'), fd = v('#b_free');
+              if (fw) { o.track.forwarder = fw === '__clear' ? '' : fw; ch = true; }
+              if (cl) { o.track.clearer = cl === '__clear' ? '' : cl; ch = true; }
+              if (doc) { o.track.docType = doc; ch = true; }
+              if (fd !== '') { o.track.freeDays = num(fd); ch = true; }
+              if (stage) {
+                const cur = E.trackStageIndex(db, o), nx = db.shipStages.findIndex(x => x.id === stage);
+                if (nx > cur || (v('#b_back') && nx !== cur)) { E.setTrackStage(db, o, stage, { date: v('#b_sdate') || today(), by: ui.user.name, note: v('#b_snote') || 'تعديل جماعي' }); ch = true; }
+              }
+            }
+            if (cI || cP) {
+              const sd = v('#b_shipdate'), eta = v('#b_eta');
+              if (status === 'shipped' && o.status === 'open') { o.shipped = true; o.shipDate = sd || o.shipDate || today(); o.shippedAt = o.shipDate; o.shippedBy = 'manual'; ch = true; }
+              else if (status === 'unship' && o.shipped) { o.shipped = false; o.shippedAt = ''; o.shippedBy = ''; ch = true; }
+              else if (status === 'received' && o.status === 'open') { o.status = 'received'; o.receivedAt = today(); o.receivedBy = 'manual'; o.receivedNote = 'تعديل جماعي — ' + ui.user.name; ch = true; }
+              else if (status === 'open' && o.status === 'received') { o.status = 'open'; o.receivedAt = ''; o.receivedBy = ''; ch = true; }
+              if (sd && status !== 'shipped') { o.shipDate = sd; ch = true; }
+              if (eta) { o.eta = eta; o.etaManual = true; ch = true; } else if (v('#b_etaauto')) { o.eta = ''; o.etaManual = false; ch = true; }
+            }
+            if (cP) {
+              const sup = v('#b_sup'), ag = v('#b_agent'), cu = v('#b_cur');
+              if (sup) { o.supplier = sup.trim(); ch = true; }
+              if (ag) { o.agent = ag.trim(); ch = true; }
+              if (cu) { o.currency = cu; ch = true; }
+              const x = sum.get(no);
+              if (payall && x && x.dueSar > 0.5) {
+                const rate = num(o.rate) > 0 ? num(o.rate) : E.fxRate(db, o.currency);
+                o.payments = o.payments || [];
+                o.payments.push({ id: 'P' + Date.now() + no, date: v('#b_paydate') || today(), amount: +(x.dueSar / rate).toFixed(2), currency: o.currency, kind: 'سداد كامل', note: v('#b_paynote') || 'تعديل جماعي', source: 'manual', by: ui.user.name });
+                ch = true;
+              }
+            }
+            if (ch) changed++;
+          }
+          log(`تعديل جماعي على ${changed} أمر شراء`);
+          m.close(); ui.keepScroll = true; commit(); toast(`تم التعديل على ${fmt(changed)} من ${fmt(nos.length)} أمر`, 'ok');
         };
       }
     });
@@ -2088,6 +2191,9 @@
       if (!await confirmBox('الرجوع لمجلد البيانات المحلي على هذا الجهاز؟ (الملف المشترك لا يُحذف)', { ok: 'رجوع' })) return;
       await api.setDataDir(null, 'default'); location.reload();
     },
+    selClear: el => { (ui.sel[el.dataset.t] || new Set()).clear(); render(); },
+    selAllVisible: el => { const id = el.dataset.t; const set = ui.sel[id] || (ui.sel[id] = new Set()); (ui.tableRows[id] || []).map(ui.selFn[id]).forEach(k => set.add(k)); render(); },
+    bulkPo: el => bulkPoModal(el.dataset.t),
     shipGroup: el => { Object.assign(ui.f.ship, { group: el.dataset.k, alert: 'الكل' }); go('ship'); },
     shipAlert: el => { Object.assign(ui.f.ship, { group: 'الكل', alert: el.dataset.k }); go('ship'); },
     shipNext: el => {
@@ -2329,6 +2435,18 @@
   });
 
   document.addEventListener('change', e => {
+    const se = e.target;
+    if (se.dataset && se.dataset.sel && !se.closest('#modalRoot')) {
+      const set = ui.sel[se.dataset.sel] || (ui.sel[se.dataset.sel] = new Set());
+      if (se.checked) set.add(se.dataset.key); else set.delete(se.dataset.key);
+      ui.keepScroll = true; return render();
+    }
+    if (se.dataset && se.dataset.selall && !se.closest('#modalRoot')) {
+      const id = se.dataset.selall, set = ui.sel[id] || (ui.sel[id] = new Set());
+      const keys = (ui.tableRows[id] || []).map(ui.selFn[id]);
+      keys.forEach(k => se.checked ? set.add(k) : set.delete(k));
+      ui.keepScroll = true; return render();
+    }
     const el = e.target, k = el.dataset.chg;
     if (!k || el.closest('#modalRoot')) return;
     const s = db.settings;
