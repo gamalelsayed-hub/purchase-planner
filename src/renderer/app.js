@@ -1155,7 +1155,7 @@
       { k: 'status', h: 'الحالة', v: o => o.status === 'open' ? 'بالطريق' : 'وصل المخزون', f: o => o.status === 'open' ? '<span class="pill brand">بالطريق</span>' : `<span class="pill ok" title="${esc(o.receivedAt)} ${o.receivedBy === 'auto' ? '(تلقائي)' : '(يدوي)'}">وصل ${esc(o.receivedAt)}</span>` },
       { k: 'lines', h: 'أصناف', n: true }, { k: 'supplier', h: 'المورد' }, { k: 'agent', h: 'المخلّص' },
       { k: 'currency', h: 'العملة', v: o => curName(o.currency) },
-      { k: 'value', h: 'القيمة', n: true, d: 2 }, { k: 'shipping', h: 'الشحن', n: true, d: 2 },
+      { k: 'value', h: 'القيمة', n: true, d: 2 }, { k: 'shipping', h: 'الشحن', n: true, d: 2 }, { k: 'extrasSar', h: 'تكاليف إضافية ' + cur(), n: true },
       { k: 'totalSar', h: 'الإجمالي ' + cur(), n: true }, { k: 'paidSar', h: 'المدفوع', n: true }, { k: 'dueSar', h: 'المتبقي للسداد', n: true, f: o => `<b>${money(o.dueSar)}</b>` },
       { k: 'payStatus', h: 'السداد', f: o => payPill(o.payStatus) },
       { k: 'eta', h: 'الوصول المتوقع', f: etaCell }, { k: 'firstSeen', h: 'أول ظهور' }, { k: 'note', h: 'ملاحظة', cls: 'wrap' }
@@ -1220,12 +1220,25 @@
       title: `أمر الشراء ${esc(no)}`, size: 'wide',
       body: `<div class="row-flex" style="margin-bottom:12px">${o.status === 'open' ? '<span class="pill brand">بالطريق</span>' : `<span class="pill ok">وصل المخزون ${esc(o.receivedAt || '')} ${o.receivedBy === 'auto' ? '(تلقائي: ' + esc(o.receivedNote || '') + ')' : '(يدوي)'}</span>`}${payPill(sm.payStatus)}<span class="small">أول ظهور ${esc(o.firstSeen || '—')} — آخر تحديث ${esc(o.lastSeen || '—')}</span></div>
       <div class="calc-grid">
-        <div class="c"><div class="l">الإجمالي (قيمة + شحن)</div><div class="v">${fmt(sm.total, 2)} ${esc(curName(sm.currency))}</div></div>
+        <div class="c"><div class="l">الإجمالي (قيمة + شحن + تكاليف إضافية)</div><div class="v">${fmt(sm.total, 2)} ${esc(curName(sm.currency))}</div></div>
         <div class="c"><div class="l">بالعملة الأساسية</div><div class="v">${money(sm.totalSar)} ${cur()}</div></div>
         <div class="c"><div class="l">المدفوع</div><div class="v">${money(sm.paidSar)}</div></div>
         <div class="c"><div class="l">المتبقي للسداد</div><div class="v" style="color:var(--bad)">${money(sm.dueSar)}</div></div>
       </div>
-      <div class="form f4" style="margin-top:12px">
+      <h3>الأصناف والكميات (${fmt((o.lines || []).length)} صنف)</h3>
+      ${(o.lines || []).length ? table('poLines', [
+        { k: 'code', h: 'رقم الصنف' }, { k: 'name', h: 'اسم الصنف', cls: 'wrap', v: l => { const it = db.items.find(i => i.code === l.code); return it ? it.name : l.name; } }, { k: 'unit', h: 'الوحدة' },
+        { k: 'qty', h: 'كمية الأمر', n: true }, { k: 'invQty', h: 'المستلم', n: true }, { k: 'remaining', h: 'المتبقي (بالطريق)', n: true, f: l => `<b>${fmt(l.remaining)}</b>` },
+        { k: 'price', h: 'سعر الوحدة', n: true, d: 4, v: l => num(l.qty) ? num(l.value) / num(l.qty) : null },
+        { k: 'value', h: 'القيمة ' + esc(curName(sm.currency)), n: true, d: 2 }, { k: 'valueSar', h: 'القيمة ' + cur(), n: true, v: l => num(l.value) * sm.rate },
+        { k: 'remValue', h: 'قيمة المتبقي', n: true, d: 2, v: l => num(l.qty) ? num(l.value) * Math.max(0, num(l.remaining)) / num(l.qty) : 0 }
+      ], o.lines, { static: true, short: true, foot: {
+        code: 'الإجمالي', qty: fmt((o.lines).reduce((a, l) => a + num(l.qty), 0)), invQty: fmt((o.lines).reduce((a, l) => a + num(l.invQty), 0)), remaining: fmt((o.lines).reduce((a, l) => a + num(l.remaining), 0)),
+        value: fmt(sm.value, 2), valueSar: money(sm.value * sm.rate), remValue: fmt(sm.remainingValue, 2) } })
+        + `<div class="small" style="margin-top:4px">قيمة الأصناف ${fmt(sm.value, 2)} + الشحن ${fmt(sm.shipping, 2)}${sm.extras ? ' + تكاليف إضافية ' + fmt(sm.extras, 2) : ''} = ${fmt(sm.total, 2)} ${esc(curName(sm.currency))} (${money(sm.totalSar)} ${cur()})</div>`
+        : '<div class="empty" style="padding:14px">الأمر بدون أصناف (من شيت السداد أو مضاف يدويًا) — الأصناف تنضاف من استيراد تقرير أوامر الشراء</div>'}
+      <h3>بيانات الأمر</h3>
+      <div class="form f4">
         <label class="f">المورد<input id="o_sup" value="${esc(o.supplier || '')}" ${dis(canPay)}></label>
         <label class="f">المخلّص<input id="o_agent" value="${esc(o.agent || '')}" ${dis(canPay)}></label>
         <label class="f">العملة<select id="o_cur" ${dis(canPay)}>${db.currencies.map(c => `<option value="${esc(c.code)}" ${o.currency === c.code ? 'selected' : ''}>${esc(c.name)} (${c.rate})</option>`).join('')}</select></label>
@@ -1235,6 +1248,21 @@
         <label class="f">الوصول المتوقع — فارغ = تلقائي (${esc(auto || '—')})<input id="o_eta" type="date" value="${esc(o.etaManual ? o.eta : '')}" ${dis(canSt)}></label>
         <label class="f full">ملاحظة<input id="o_note" value="${esc(o.note || '')}" ${dis(canPay || canSt)}></label>
       </div>
+      <h3>التكاليف الإضافية</h3>
+      ${table('poExtras', [
+        { k: 'date', h: 'التاريخ' }, { k: 'desc', h: 'البيان' }, { k: 'amount', h: 'المبلغ', n: true, d: 2 }, { k: 'currency', h: 'العملة', v: x => curName(x.currency || o.currency) },
+        { k: 'sar', h: 'بال' + cur(), n: true, v: x => num(x.amount) * (num(x.rate) > 0 ? num(x.rate) : E.fxRate(db, x.currency || o.currency)) }, { k: 'note', h: 'ملاحظة', cls: 'wrap' }, { k: 'by', h: 'بواسطة' },
+        { k: 'del', h: '', nosort: true, f: x => canPay ? `<button class="sm danger" data-delext="${esc(x.id)}">حذف</button>` : '' }
+      ], o.extraCosts || [], { static: true, short: true, empty: 'لا توجد تكاليف إضافية', foot: (o.extraCosts || []).length ? { desc: 'الإجمالي', sar: money(sm.extrasSar) } : null })}
+      ${canPay ? `<div class="form f4" style="margin-top:10px;align-items:end">
+        <label class="f">البيان<input id="x_desc" list="dl_extras" placeholder="جمارك، تخليص، نقل…"></label>
+        <label class="f">المبلغ<input id="x_amt" type="number" step="any"></label>
+        <label class="f">العملة<select id="x_cur">${db.currencies.map((c, i) => `<option value="${esc(c.code)}" ${i === 0 ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+        <label class="f">التاريخ<input id="x_date" type="date" value="${today()}"></label>
+        <label class="f full">ملاحظة<input id="x_note"></label>
+        <button class="primary" id="x_add">+ إضافة تكلفة</button>
+        <datalist id="dl_extras">${['جمارك', 'تخليص جمركي', 'نقل داخلي', 'أرضيات', 'تأمين', 'فحص'].map(x => `<option value="${x}">`).join('')}</datalist>
+      </div>` : ''}
       <h3>الدفعات</h3>
       ${table('poPays', [
         { k: 'date', h: 'التاريخ' }, { k: 'kind', h: 'النوع' }, { k: 'amount', h: 'المبلغ', n: true, d: 2 }, { k: 'currency', h: 'العملة', v: p => curName(p.currency || o.currency) },
@@ -1249,9 +1277,7 @@
         <label class="f full">ملاحظة الدفعة<input id="p_note"></label>
         <button class="primary" id="p_add">+ إضافة دفعة</button><button id="p_full">سداد المتبقي بالكامل</button>
       </div>` : ''}
-      <h3>الأصناف</h3>
-      ${table('poLines', [{ k: 'code', h: 'رقم الصنف' }, { k: 'name', h: 'اسم الصنف', cls: 'wrap', v: l => { const it = db.items.find(i => i.code === l.code); return it ? it.name : l.name; } }, { k: 'unit', h: 'الوحدة' },
-        { k: 'qty', h: 'كمية الأمر', n: true }, { k: 'invQty', h: 'المستلم', n: true }, { k: 'remaining', h: 'المتبقي (بالطريق)', n: true }, { k: 'value', h: 'القيمة', n: true, d: 2 }], o.lines || [], { static: true, short: true, empty: 'الأمر بدون أصناف (من شيت السداد فقط)' })}`,
+`,
       foot: `<button class="primary" data-save ${canPay || canSt ? '' : 'disabled'}>حفظ</button><button data-close>إغلاق</button><span class="grow"></span>${canSt ? (o.status === 'open' ? '<button class="ok" data-recv>وصل المخزون</button>' : '<button data-reopen>إعادة فتح (لم يصل)</button>') : ''}${can('data_admin') ? '<button class="danger" data-delpo>حذف الأمر</button>' : ''}`,
       onMount: m => {
         const save = () => {
@@ -1270,6 +1296,15 @@
         if (pa) pa.onclick = () => { const a = num(m.q('#p_amt').value); if (!(a > 0)) return toast('أدخل المبلغ', 'bad'); save(); add(a, m.q('#p_kind').value, m.q('#p_cur').value, m.q('#p_note').value.trim(), m.q('#p_date').value || today()); reopenModal(); };
         const pf = m.q('#p_full');
         if (pf) pf.onclick = () => { save(); const x = E.poSummary(db, today()).find(y => y.no === no); if (!(x.dueSar > 0.5)) return toast('لا يوجد متبقي'); add(+(x.dueSar / x.rate).toFixed(2), 'سداد كامل', o.currency, m.q('#p_note').value.trim(), m.q('#p_date').value || today()); reopenModal(); };
+        const xa = m.q('#x_add');
+        if (xa) xa.onclick = () => {
+          const a = num(m.q('#x_amt').value), d = m.q('#x_desc').value.trim();
+          if (!d) return toast('اكتب بيان التكلفة', 'bad'); if (!(a > 0)) return toast('أدخل المبلغ', 'bad');
+          save(); o.extraCosts = o.extraCosts || [];
+          o.extraCosts.push({ id: 'X' + Date.now(), date: m.q('#x_date').value || today(), desc: d, amount: a, currency: m.q('#x_cur').value, note: m.q('#x_note').value.trim(), by: ui.user.name });
+          log(`تكلفة إضافية «${d}» ${fmt(a, 2)} ${m.q('#x_cur').value} على أمر الشراء ${no}`); reopenModal();
+        };
+        m.q('.modal-body').addEventListener('click', e => { const bx = e.target.closest('[data-delext]'); if (!bx) return; save(); o.extraCosts = (o.extraCosts || []).filter(x => x.id !== bx.dataset.delext); log('حذف تكلفة إضافية من أمر الشراء ' + no); reopenModal(); });
         m.q('.modal-body').addEventListener('click', e => { const b = e.target.closest('[data-delpay]'); if (!b) return; save(); o.payments = o.payments.filter(p => p.id !== b.dataset.delpay); log('حذف دفعة من أمر الشراء ' + no); reopenModal(); });
         const rv = m.q('[data-recv]'); if (rv) rv.onclick = () => { save(); o.status = 'received'; o.receivedAt = today(); o.receivedBy = 'manual'; o.receivedNote = 'يدوي — ' + ui.user.name; log('أمر الشراء ' + no + ' وصل المخزون (يدوي)'); m.close(); commit(); };
         const ro = m.q('[data-reopen]'); if (ro) ro.onclick = () => { save(); o.status = 'open'; o.receivedAt = ''; o.receivedBy = ''; o.flags = (o.flags || []).filter(f => f !== 'stillInReport'); log('إعادة فتح أمر الشراء ' + no); m.close(); commit(); };
@@ -1885,6 +1920,12 @@
     }
   };
 
+  // الضغط مرتين على السطر = نفس الضغط مرة (يفتح التفاصيل)
+  document.addEventListener('dblclick', e => {
+    const el = e.target.closest('[data-act="row"]');
+    if (!el || e.target.closest('input,select,button') || document.querySelector('#modalRoot .modal-back')) return;
+    ACT.row(el, e);
+  });
   document.addEventListener('click', e => {
     const el = e.target.closest('[data-act]');
     if (!el || !$('#app').contains(el) && !el.closest('#modalRoot')) return;

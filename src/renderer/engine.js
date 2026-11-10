@@ -13,7 +13,10 @@
   // ---------- أدوات عامة ----------
   function normUnit(u) {
     return String(u == null ? '' : u)
+      .normalize('NFKC')
+      .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d))
       .trim()
+      .replace(/\s+(?=\d)/g, '')
       .replace(/\s+/g, ' ')
       .replace(/[ةه](?=$|\s|\d)/g, 'ه')
       .replace(/[أإآ]/g, 'ا')
@@ -463,15 +466,18 @@
       const remainingValue = (o.lines || []).reduce((a, l) => a + (num(l.qty) > 0 ? num(l.value) * Math.max(0, num(l.remaining)) / num(l.qty) : 0), 0);
       const rate = num(o.rate) > 0 ? num(o.rate) : fxRate(db, o.currency);
       const shipping = num(o.shipping);
-      const total = value + shipping;
-      const totalSar = total * rate;
+      // تكاليف إضافية يدوية (جمارك، تخليص، نقل…) — كل تكلفة بعملتها
+      const extrasSar = (o.extraCosts || []).reduce((a, x) => a + num(x.amount) * (num(x.rate) > 0 ? num(x.rate) : fxRate(db, x.currency || o.currency)), 0);
+      const extras = rate ? extrasSar / rate : 0;
+      const total = value + shipping + extras;
+      const totalSar = (value + shipping) * rate + extrasSar;
       const paidSar = (o.payments || []).reduce((a, p) => a + num(p.amount) * (num(p.rate) > 0 ? num(p.rate) : fxRate(db, p.currency || o.currency)), 0);
       const dueSar = Math.max(0, totalSar - paidSar);
       const eta = o.etaManual && o.eta ? o.eta : poAutoEta(db, o);
       const daysToEta = eta ? Math.round((new Date(eta + 'T00:00:00Z') - new Date(today + 'T00:00:00Z')) / 86400000) : null;
       const payStatus = totalSar <= 0 ? 'غير محدد' : paidSar <= 0.005 ? 'غير مسدد' : paidSar + 0.5 >= totalSar ? 'مسدد' : 'مسدد جزئيًا';
       return {
-        no, status: o.status, currency: o.currency || 'SAR', rate, value, shipping, total, totalSar, paidSar, dueSar, payStatus,
+        no, status: o.status, currency: o.currency || 'SAR', rate, value, shipping, extras, extrasSar, total, totalSar, paidSar, dueSar, payStatus,
         remainingValue, lines: (o.lines || []).length, eta, etaManual: !!o.etaManual, daysToEta, agent: o.agent || '', supplier: o.supplier || '',
         firstSeen: o.firstSeen || '', lastSeen: o.lastSeen || '', receivedAt: o.receivedAt || '', receivedBy: o.receivedBy || '', note: o.note || '', poDate: o.poDate || '',
         payments: (o.payments || []).length, flags: o.flags || []

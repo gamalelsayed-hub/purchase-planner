@@ -121,6 +121,11 @@ close(p3.dueSar, (2000 - 500) * 3.75, 'P3 due'); assert.strictEqual(p3.payStatus
 // إعادة استيراد الشيت لا تكرر الدفعات
 I.applyPOPay(db, [{ poNo: 'P1', status: 'تم السداد' }], { date: '2026-07-21', currencyHint: 'USD' });
 assert.strictEqual(db.po.orders.P1.payments.length, 1);
+// تكاليف إضافية بعملة مختلفة تدخل الإجمالي والمتبقي
+db.po.orders.P1.extraCosts = [{ id: 'x1', desc: 'جمارك', amount: 375, currency: 'SAR' }];
+const p1b = E.poSummary(db, '2026-07-21').find(o => o.no === 'P1');
+close(p1b.extrasSar, 375, 'extras SAR'); close(p1b.totalSar, 1100 * 3.75 + 375, 'total incl extras'); close(p1b.dueSar, 375, 'due = unpaid extras');
+assert.strictEqual(p1b.payStatus, 'مسدد جزئيًا');
 // عملة من عنوان العمود
 assert.strictEqual(I.currencyFromHeader('القيمة دولار'), 'USD');
 
