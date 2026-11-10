@@ -351,7 +351,7 @@
     pgExcel: 'export', pgPdf: 'export', pgPrint: 'export', tpl: 'export', tplItemsFull: 'export', exportBackup: 'export',
     poReceive: 'po_import', poReopen: 'po_import', clearManualTransit: 'import_data', poQuickRecv: 'po_import', poQuickPay: 'po_payments', poNew: 'po_payments'
   };
-  const CHG_PERM = { adj: 'adjust', reason: 'adjust', stockDate: 'import_data', set: 'settings', setPct: 'settings', type: 'settings', cls: 'settings', exc: 'settings', cur: 'settings' };
+  const CHG_PERM = { adj: 'adjust', reason: 'adjust', stockDate: 'import_data', set: 'settings', setBool: 'settings', setPct: 'settings', type: 'settings', cls: 'settings', exc: 'settings', cur: 'settings' };
   const IMPORT_PERM = { items: 'items', sales: 'import_data', stock: 'import_data', transit: 'import_data', po: 'po_import', poPay: 'po_payments' };
 
   function pageAuth() {
@@ -1081,7 +1081,7 @@
       ${table('transitT', [{ k: 'code', h: 'رقم الصنف' }, { k: 'name', h: 'اسم الصنف', cls: 'wrap' }, { k: 'unit', h: 'الوحدة' }, { k: 'qty', h: 'الكمية', n: true, d: 2 }, { k: 'source', h: 'المصدر / رقم الأمر' },
         { k: 'chk', h: 'التحويل', f: r => { const it = idx.get(r.code); if (!it) return '<span class="pill bad">غير موجود</span>'; const f = E.unitFactor(it, r.unit); return f == null ? '<span class="pill bad">وحدة غير معرّفة</span>' : f === 1 ? '<span class="pill ok">أساسية</span>' : `<span class="pill brand">× ${fmt(f, 4)}</span>`; } },
         { k: 'del', h: '', nosort: true, f: r => `<button class="sm danger" data-act="delTransit" data-i="${r._i}">حذف</button>` }], rows)}
-      <div class="card" style="margin-top:16px"><h2>من أوامر الشراء المفتوحة (تلقائي)</h2><div class="hint">الكمية المتبقية في أوامر الشراء المفتوحة تنخصم تلقائيًا كبضاعة بالطريق. للتعديل: شاشة «أوامر الشراء».</div>
+      <div class="card" style="margin-top:16px"><h2>من أوامر الشراء المفتوحة ${db.settings.poAsTransit ? '<span class="pill ok">تنخصم من الطلب</span>' : '<span class="pill">لا تنخصم — الإعداد مقفل</span>'}</h2><div class="hint">${db.settings.poAsTransit ? 'الكمية المتبقية في أوامر الشراء المفتوحة تنخصم تلقائيًا كبضاعة بالطريق.' : 'للعرض فقط. لتفعيل الخصم: الإعدادات ← «خصم أوامر الشراء المفتوحة من الطلب».'} للتعديل: شاشة «أوامر الشراء».</div>
       ${table('transitPo', [{ k: 'source', h: 'أمر الشراء' }, { k: 'code', h: 'رقم الصنف' }, { k: 'name', h: 'اسم الصنف', cls: 'wrap' }, { k: 'unit', h: 'الوحدة' }, { k: 'qty', h: 'الكمية المتبقية', n: true, d: 2 }], E.openPoLines(db), { short: true, empty: 'لا توجد أوامر شراء مفتوحة' })}</div>`;
   }
   function unitIssueGroups() {
@@ -1132,9 +1132,9 @@
       { k: 'date', h: 'تاريخ التقرير' }, { k: 'file', h: 'الملف' }, { k: 'user', h: 'المستخدم' }, { k: 'orders', h: 'أوامر', n: true }, { k: 'newOrders', h: 'جديد', n: true }, { k: 'closed', h: 'وصل المخزون', n: true }
     ], (db.po.imports || []).slice().reverse(), { empty: 'لا يوجد استيراد بعد' });
     else body = poOrdersTab();
-    return `<div class="page-head"><div><h1>أوامر الشراء والكاش المطلوب</h1><div class="sub">متابعة الأوامر بالطريق وحالة السداد — الكمية المتبقية في الأوامر المفتوحة تنخصم تلقائيًا من الطلب كبضاعة بالطريق</div></div>
+    return `<div class="page-head"><div><h1>أوامر الشراء والكاش المطلوب</h1><div class="sub">متابعة الأوامر بالطريق وحالة السداد — ${db.settings.poAsTransit ? 'الكمية المتبقية في الأوامر المفتوحة <b>تنخصم من الطلب</b> كبضاعة بالطريق' : 'الأوامر للمتابعة والكاش فقط و<b>لا تنخصم من الطلب</b> (الإعداد مقفل)'}</div></div>
       <div class="actions"><button class="primary" data-act="import" data-k="po">استيراد أوامر الشراء (Excel / PDF)</button><button data-act="import" data-k="poPay">استيراد شيت السداد</button><button data-act="poNew">إضافة أمر يدوي</button><button data-act="tpl" data-k="po">قالب أوامر الشراء</button><button data-act="tpl" data-k="poPay">قالب السداد</button></div></div>
-      ${manualTransit && open.some(o => o.lines) ? `<div class="banner warn no-print"><span class="grow">يوجد ${fmt(manualTransit)} سطر بضاعة بالطريق مُدخل يدويًا بجانب أوامر الشراء — إذا كانت نفس الأوامر فهي تنخصم مرتين.</span><button class="sm" data-act="clearManualTransit">مسح بالطريق اليدوي</button><button class="sm" data-act="dataTabGo" data-k="transit">عرض</button></div>` : ''}
+      ${db.settings.poAsTransit && manualTransit && open.some(o => o.lines) ? `<div class="banner warn no-print"><span class="grow">يوجد ${fmt(manualTransit)} سطر بضاعة بالطريق مُدخل يدويًا بجانب أوامر الشراء — إذا كانت نفس الأوامر فهي تنخصم مرتين.</span><button class="sm" data-act="clearManualTransit">مسح بالطريق اليدوي</button><button class="sm" data-act="dataTabGo" data-k="transit">عرض</button></div>` : ''}
       <div class="tabs">${tabs.map(([k, l]) => `<div class="tab ${tab === k ? 'active' : ''}" data-act="poTab" data-k="${k}">${l}</div>`).join('')}</div>${body}`;
   };
   function poOrdersTab() {
@@ -1201,12 +1201,12 @@
     const body = kind === 'po'
       ? list('أوامر جديدة', r.newOrders) + list('وصل المخزون (اختفى من التقرير)', r.closed) + list('وصل المخزون (الكمية المتبقية صفر)', r.completed) + list('أعيد فتحها (رجعت للتقرير)', r.reopened) +
         (r.added.length ? `<div class="banner warn" style="margin-top:10px">أضيف ${fmt(r.added.length)} صنف غير موجود كـ «غير مصنف»: ${r.added.map(a => esc(a.code)).join('، ')}</div>` : '') +
-        (db.transit.length ? `<div class="banner warn" style="margin-top:10px">يوجد ${fmt(db.transit.length)} سطر بضاعة بالطريق مُدخل يدويًا — إذا كانت نفس هذه الأوامر امسحها حتى لا تنخصم مرتين.</div>` : '')
+        (db.settings.poAsTransit && db.transit.length ? `<div class="banner warn" style="margin-top:10px">يوجد ${fmt(db.transit.length)} سطر بضاعة بالطريق مُدخل يدويًا — إذا كانت نفس هذه الأوامر امسحها حتى لا تنخصم مرتين.</div>` : '')
       : list('أوامر جديدة من الشيت (بدون أصناف)', r.created) + (r.fromNote.length ? `<div class="banner warn" style="margin-top:10px">دفعات أُخذت من نص الملاحظة — راجع مبلغها وعملتها: ${r.fromNote.map(esc).join('، ')}</div>` : '');
     modal({
       title: kind === 'po' ? 'نتيجة استيراد أوامر الشراء' : 'نتيجة استيراد شيت السداد',
       body: `<div class="banner ok">${esc(msg)}</div>${body}`,
-      foot: `<button class="primary" data-close>تم</button>${kind === 'po' && db.transit.length && can('import_data') ? '<button class="danger" data-clr>مسح بالطريق اليدوي</button>' : ''}`,
+      foot: `<button class="primary" data-close>تم</button>${kind === 'po' && db.settings.poAsTransit && db.transit.length && can('import_data') ? '<button class="danger" data-clr>مسح بالطريق اليدوي</button>' : ''}`,
       onMount: m => { const b = m.q('[data-clr]'); if (b) b.onclick = () => { db.transit = []; log('مسح البضاعة بالطريق اليدوية بعد استيراد أوامر الشراء'); m.close(); commit(); }; }
     });
   }
@@ -1374,7 +1374,8 @@
       <table class="t" style="margin-top:8px;max-width:620px"><thead><tr><th>الرمز</th><th>الاسم</th><th>سعر الصرف (= كم ${esc(cur())})</th><th></th></tr></thead><tbody>
       ${db.currencies.map((c, i) => `<tr><td><input class="inp" style="width:80px" data-chg="cur" data-i="${i}" data-k="code" value="${esc(c.code)}"></td><td><input class="inp" style="width:120px" data-chg="cur" data-i="${i}" data-k="name" value="${esc(c.name)}"></td><td><input class="inp" style="width:100px" type="number" step="any" min="0" data-chg="cur" data-i="${i}" data-k="rate" value="${c.rate}"></td><td>${i ? `<button class="sm danger" data-act="delCur" data-i="${i}">حذف</button>` : '<span class="small">الأساسية</span>'}</td></tr>`).join('')}
       </tbody></table><button class="sm" data-act="addCur" style="margin-top:8px">+ إضافة عملة</button>
-      <div class="form f4" style="margin-top:12px"><label class="f">أفق الكاش المطلوب (يوم)<input class="inp" type="number" step="1" min="1" data-chg="set" data-k="cashHorizonDays" value="${esc(s.cashHorizonDays)}"></label></div>
+      <div class="form f4" style="margin-top:12px"><label class="f">أفق الكاش المطلوب (يوم)<input class="inp" type="number" step="1" min="1" data-chg="set" data-k="cashHorizonDays" value="${esc(s.cashHorizonDays)}"></label>
+        <label class="f" style="grid-column:span 3">خصم أوامر الشراء المفتوحة من الطلب كبضاعة بالطريق<select class="inp" data-chg="setBool" data-k="poAsTransit"><option value="0" ${!s.poAsTransit ? 'selected' : ''}>مقفل — أوامر الشراء للمتابعة والكاش فقط، والطلب يعتمد على البضاعة بالطريق اليدوية</option><option value="1" ${s.poAsTransit ? 'selected' : ''}>مفعّل — الكمية المتبقية في الأوامر المفتوحة تنخصم من الطلب تلقائيًا</option></select></label></div>
     </div>
 
     <div class="card"><h2>الفترات الاستثنائية المؤقتة</h2>
@@ -1979,6 +1980,12 @@
       if (el.type === 'number') v = num(v);
       if (key === 'nMonths') v = Math.max(1, Math.min(36, Math.round(v)));
       s[key] = v;
+      return commit();
+    }
+    if (k === 'setBool') {
+      s[el.dataset.k] = el.value === '1';
+      log((s[el.dataset.k] ? 'تفعيل' : 'إيقاف') + ' خصم أوامر الشراء من الطلب');
+      if (s.poAsTransit && db.transit.length && Object.values(db.po.orders).some(o => o.status === 'open' && (o.lines || []).length)) toast(`انتبه: يوجد ${fmt(db.transit.length)} سطر بضاعة بالطريق يدوي — إذا كانت نفس أوامر الشراء امسحها حتى لا تنخصم مرتين`, 'bad');
       return commit();
     }
     if (k === 'setPct') { s[el.dataset.k] = num(el.value) / 100; return commit(); }

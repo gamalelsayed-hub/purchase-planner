@@ -100,6 +100,9 @@ const poRows = (list) => list.map(([poNo, code, unit, qty, value, inv]) => ({ po
 let pr = I.applyPOs(db, poRows([['P1', 'A1', 'كرتون', 10, 1000, 0], ['P1', 'B1', 'حبه', 40, 200, 10], ['P2', 'B1', 'حبه', 5, 50, 0]]), { date: '2026-07-01' });
 assert.strictEqual(pr.orders, 2); assert.strictEqual(pr.newOrders.length, 2);
 assert.strictEqual(db.po.orders.P1.currency, 'USD', 'currency from item type (خارجي)');
+// الإعداد مقفل (الافتراضي): أوامر الشراء لا تنخصم من الطلب
+close(E.compute(db).rows[0].transit, 0, 'PO not counted when setting is off');
+db.settings.poAsTransit = true;
 let rr = E.compute(db).rows;
 close(rr[0].transit, 100, 'A1 transit from PO = 10 cartons'); close(rr[1].transit, 35, 'B1 transit = (40-10) + 5');
 // P1 تلقائيًا: الوصول = أول ظهور + أطول توصيل (خارجي 3 أشهر)

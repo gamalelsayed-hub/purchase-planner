@@ -131,6 +131,7 @@
       extraBasis: 'avg_std', // avg_std = (المتوسط + الانحراف) ، avg = المتوسط فقط
       classifyScope: 'all', // all = كل الأصناف ، active = النشطة فقط
       cashHorizonDays: 60, // أفق الكاش المطلوب (يوم)
+      poAsTransit: false, // خصم الكمية المتبقية في أوامر الشراء المفتوحة من الطلب كبضاعة بالطريق
       defaultType: 'مصنع',
       defaultLead: 1,
       keepMonths: 24,
@@ -262,7 +263,7 @@
     }
     // بالطريق: الإدخال اليدوي + الكمية المتبقية في أوامر الشراء المفتوحة
     const transitPo = new Array(n).fill(0), transitManual = new Array(n).fill(0);
-    for (const r of openPoLines(db)) {
+    for (const r of (s.poAsTransit ? openPoLines(db) : [])) {
       const i = itemIdx.get(r.code);
       if (i === undefined) { issues.push({ kind: 'missingItem', sheet: 'أوامر الشراء', code: r.code, name: r.name, unit: r.unit, severity: 'x' }); continue; }
       const f = unitFactor(items[i], r.unit);
