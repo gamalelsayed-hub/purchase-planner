@@ -211,3 +211,5 @@ body.auth #sidebar { display: none; }
 .side-btns button:hover { background: rgba(255,255,255,.16); }
 body.ro input[data-chg]:not([data-chg="filter"]), body.ro select[data-chg]:not([data-chg="filter"]) { background: #f1f2f4; border-color: var(--line); pointer-events: none; }
 code { font-family: Consolas, monospace; background: #f1f3f6; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+.perm-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; }
+.perm-grid .chk { align-items: flex-start; line-height: 1.6; }

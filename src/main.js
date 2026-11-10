@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { readWorkbook, writeWorkbook } = require('./xlsxio');
+const { readPdfTable } = require('./pdftable');
 
 let win;
 const machine = os.hostname();
@@ -184,13 +185,28 @@ async function fetchRepo(repo) {
   if (!r.ok) throw new Error('GitHub ' + r.status);
   return r.json();
 }
+// طريقة بديلة بدون حد طلبات: صفحة releases/latest تحوّل لرابط آخر إصدار (build-N)
+async function fetchLatestByRedirect(repo) {
+  const r = await net.fetch(`https://github.com/${repo}/releases/latest`, { redirect: 'manual', headers: { 'User-Agent': 'PurchasePlanner' } });
+  const loc = r.headers.get('location') || '';
+  const m = loc.match(/\/releases\/tag\/([^/?#]+)/);
+  if (!m) return null;
+  return { tag_name: decodeURIComponent(m[1]), name: decodeURIComponent(m[1]), body: '', html_url: loc,
+    assets: [{ name: 'PurchasePlanner-Setup.exe', browser_download_url: `https://github.com/${repo}/releases/latest/download/PurchasePlanner-Setup.exe`, size: 0 }] };
+}
 async function fetchLatest() {
-  const found = []; let err = null;
-  for (const repo of [RELEASES_REPO, REPO]) {
-    try { const d = await fetchRepo(repo); if (d && buildOf(d)) found.push(d); } catch (e) { err = e; }
+  // المستودع العام أولًا (طلب واحد)، ومستودع التنزيلات فقط إذا ما فيه إصدارات
+  for (const repo of [REPO, RELEASES_REPO]) {
+    try {
+      const d = await fetchRepo(repo);
+      if (d && buildOf(d)) return d;
+    } catch (e) {
+      // 403/429 = تجاوز حد الطلبات أو مستودع خاص ← الطريقة البديلة
+      try { const d = await fetchLatestByRedirect(repo); if (d && buildOf(d)) return d; } catch (e2) { /* */ }
+      if (repo === RELEASES_REPO) throw e;
+    }
   }
-  if (!found.length) { if (err) throw err; return null; }
-  return found.sort((x, y) => buildOf(y) - buildOf(x))[0];
+  return null;
 }
 ipcMain.handle('update:check', async () => {
   const current = app.getVersion();
@@ -236,11 +252,13 @@ ipcMain.handle('file:openExcel', async (_e, opts = {}) => {
   const r = await dialog.showOpenDialog(win, {
     title: opts.title || 'اختر ملف Excel',
     properties: ['openFile'],
-    filters: [{ name: 'Excel', extensions: ['xlsx', 'xlsm', 'csv'] }]
+    filters: [{ name: 'Excel / PDF', extensions: ['xlsx', 'xlsm', 'csv', 'pdf'] }, { name: 'Excel', extensions: ['xlsx', 'xlsm', 'csv'] }, { name: 'PDF', extensions: ['pdf'] }]
   });
   if (r.canceled || !r.filePaths[0]) return null;
   const file = r.filePaths[0];
-  const wb = await readWorkbook(file, opts);
+  // PDF نصّي (تقرير من النظام): نقرأ الجدول من مواضع الكلمات
+  const wb = /\.pdf$/i.test(file) ? await readPdfTable(fs.readFileSync(file)) : await readWorkbook(file, opts);
+  if (/\.pdf$/i.test(file) && !wb.sheets[0].rows.length) throw new Error('ما قدرت أقرأ جدول من ملف PDF — تأكد أنه تقرير نصّي وليس صورة ممسوحة');
   return { file, name: path.basename(file), sheets: wb.sheets };
 });
 ipcMain.handle('file:saveExcel', async (_e, spec, defaultName) => {

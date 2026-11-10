@@ -6,7 +6,33 @@
 
   // ================= الحالة =================
   let db = null, res = null;
-  const ROLES = { admin: 'مدير', purchasing: 'مشتريات', viewer: 'مشاهد' };
+  // الصلاحيات: كل مستخدم له قائمة صلاحيات يختارها المدير، والقوالب تعبّيها بضغطة
+  const PERMS = [
+    ['export', 'تصدير Excel وPDF والطباعة'],
+    ['import_data', 'استيراد المبيعات والمخزون والبضاعة بالطريق'],
+    ['items', 'إضافة وتعديل الأصناف والوحدات والتصنيف اليدوي'],
+    ['adjust', 'التعديل اليدوي على كميات الطلب'],
+    ['approve', 'اعتماد الطلب الشهري'],
+    ['po_import', 'أوامر الشراء: الاستيراد وحالة الوصول وتاريخه'],
+    ['po_payments', 'أوامر الشراء: السداد والشحن والمخلّص'],
+    ['settings', 'الإعدادات وسياسة المخزون والعملات'],
+    ['users', 'إدارة المستخدمين والصلاحيات'],
+    ['data_admin', 'إدارة البيانات: الإكسيل القديم، الاسترجاع، المسح، المجلد المشترك، الحذف']
+  ];
+  const ROLE_TEMPLATES = {
+    admin: { label: 'مدير', perms: PERMS.map(p => p[0]) },
+    purchasing: { label: 'مشتريات', perms: ['export', 'import_data', 'items', 'adjust', 'po_import'] },
+    ap: { label: 'محاسب موردين', perms: ['export', 'po_import', 'po_payments'] },
+    viewer: { label: 'مشاهد', perms: ['export'] }
+  };
+  const ROLES = Object.fromEntries(Object.entries(ROLE_TEMPLATES).map(([k, v]) => [k, v.label]));
+  const userPerms = u => Array.isArray(u.perms) ? u.perms : ((ROLE_TEMPLATES[u.role] || ROLE_TEMPLATES.viewer).perms);
+  function roleLabel(u) {
+    const ps = userPerms(u).slice().sort().join(',');
+    const t = Object.values(ROLE_TEMPLATES).find(x => x.perms.slice().sort().join(',') === ps);
+    return t ? t.label : 'مخصص';
+  }
+  const canEditAnything = u => userPerms(u).some(p => p !== 'export');
   const ui = {
     user: null, readOnly: true, lockHolder: null, cfg: null, mtime: 0,
     page: 'dashboard',
@@ -15,11 +41,13 @@
     rowHandlers: {},
     printing: false,
     dataTab: 'sales',
+    poTab: 'orders',
     f: {
       order: { type: 'الكل', group: 'الكل', cls: 'الكل', show: 'ordered', q: '' },
       calc: { type: 'الكل', group: 'الكل', cls: 'الكل', status: 'الكل', q: '' },
       items: { type: 'الكل', group: 'الكل', active: 'الكل', flag: 'الكل', q: '' },
-      sales: { q: '' }, stock: { q: '' }, transit: { q: '' }
+      sales: { q: '' }, stock: { q: '' }, transit: { q: '' },
+      po: { status: 'open', pay: 'الكل', agent: 'الكل', q: '' }, cash: { horizon: '' }
     }
   };
 
@@ -132,6 +160,10 @@
     if (!d.adjustments) d.adjustments = {};
     if (!d.meta) d.meta = {};
     if (!Array.isArray(d.users)) d.users = [];
+    if (!Array.isArray(d.currencies) || !d.currencies.length) d.currencies = base.currencies;
+    if (!d.po || typeof d.po !== 'object') d.po = base.po;
+    if (!d.po.orders) d.po.orders = {}; if (!Array.isArray(d.po.imports)) d.po.imports = [];
+    for (const t of d.types) if (!t.currency) t.currency = /خارج|استيراد/.test(t.name + (t.note || '')) ? 'USD' : 'SAR';
     for (const it of d.items) { if (!Array.isArray(it.units)) it.units = []; }
     return d;
   }
@@ -231,13 +263,14 @@
     { sep: true },
     { id: 'items', t: 'الأصناف', i: '▤' },
     { id: 'data', t: 'المبيعات والمخزون', i: '⇅' },
+    { id: 'po', t: 'أوامر الشراء والكاش', i: '⛴' },
     { id: 'archive', t: 'الأرشيف', i: '▣' },
     { id: 'settings', t: 'الإعدادات', i: '⚙' },
     { id: 'users', t: 'المستخدمين', i: '👤', admin: true }
   ];
   function renderNav() {
     const auto = res ? res.rows.filter(r => r.autoAdded).length : 0;
-    $('#nav').innerHTML = NAV.filter(n => !n.admin || (ui.user && ui.user.role === 'admin')).map(n => {
+    $('#nav').innerHTML = NAV.filter(n => !n.admin || has('users')).map(n => {
       if (n.sep) return '<div class="nav-sep"></div>';
       let badge = '';
       if (n.id === 'checks' && res) badge = res.blocking ? `<span class="badge">${res.blocking}</span>` : (res.warnings ? `<span class="badge w">${res.warnings}</span>` : '');
@@ -248,7 +281,7 @@
     $('#sideFoot').innerHTML = (s.lastMonth
       ? `آخر شهر مبيعات: <b>${monthLabel(s.lastMonth)}</b><br>شهر الطلب: <b>${monthLabel(res.orderMonth)}</b><br>المخزون: ${esc(db.stock.date || s.stockDate || '—')}<br>${fmt(db.items.length)} صنف`
       : 'لا توجد بيانات بعد') +
-      `<div class="userbox"><b>${esc(ui.user.name)}</b> — ${ROLES[ui.user.role]}<br>${ui.readOnly ? '🔒 للعرض فقط' : '✎ وضع التعديل'}${ui.cfg && !ui.cfg.isDefault ? '<br>📁 مجلد مشترك' : ''}
+      `<div class="userbox"><b>${esc(ui.user.name)}</b> — ${roleLabel(ui.user)}<br>${ui.readOnly ? '🔒 للعرض فقط' : '✎ وضع التعديل'}${ui.cfg && !ui.cfg.isDefault ? '<br>📁 مجلد مشترك' : ''}
         <div class="side-btns"><button class="sm" data-act="checkUpdate">فحص التحديثات</button><button class="sm" data-act="myPassword">كلمة المرور</button><button class="sm" data-act="logout">خروج</button></div>
         <div class="small" style="opacity:.7">نسخة رقم ${ui.cfg ? (String(ui.cfg.version).split('.').pop() === '0' ? 'تطوير' : String(ui.cfg.version).split('.').pop()) : ''}</div></div>`;
   }
@@ -264,7 +297,7 @@
     document.body.classList.toggle('ro', ui.readOnly);
     renderNav();
     const fn = PAGES[ui.page] || PAGES.dashboard;
-    const banner = ui.readOnly ? `<div class="banner warn no-print"><span class="grow">${ui.user.role === 'viewer' ? '👁 وضع العرض فقط (صلاحية مشاهد)' : `🔒 للعرض فقط — البيانات مفتوحة للتعديل عند <b>${esc((ui.lockHolder && (ui.lockHolder.name || ui.lockHolder.user)) || '—')}</b> على جهاز ${esc((ui.lockHolder && ui.lockHolder.machine) || '—')}. سيتحدث العرض تلقائيًا، وتحصل على التعديل أول ما يغلق البرنامج.`}</span>${ui.user.role !== 'viewer' ? '<button class="sm" data-act="tryLock">محاولة التعديل الآن</button>' : ''}</div>` : '';
+    const banner = ui.readOnly ? `<div class="banner warn no-print"><span class="grow">${!canEditAnything(ui.user) ? '👁 وضع العرض فقط (صلاحياتك عرض وتصدير)' : `🔒 للعرض فقط — البيانات مفتوحة للتعديل عند <b>${esc((ui.lockHolder && (ui.lockHolder.name || ui.lockHolder.user)) || '—')}</b> على جهاز ${esc((ui.lockHolder && ui.lockHolder.machine) || '—')}. سيتحدث العرض تلقائيًا، وتحصل على التعديل أول ما يغلق البرنامج.`}</span>${canEditAnything(ui.user) ? '<button class="sm" data-act="tryLock">محاولة التعديل الآن</button>' : ''}</div>` : '';
     $('#main').innerHTML = banner + (!db.items.length && !['settings', 'items', 'users'].includes(ui.page) ? pageWelcome() : fn());
     const actions = $('#main .page-head .actions');
     const exp = EXPORTS[ui.page];
@@ -293,27 +326,33 @@
   }
   async function makeUser(username, name, role, pw) {
     const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
-    return { username: username.trim().toLowerCase(), name: name.trim() || username.trim(), role, salt, hash: await hashPw(pw, salt), active: true, createdAt: nowStamp() };
+    return { username: username.trim().toLowerCase(), name: name.trim() || username.trim(), role, perms: (ROLE_TEMPLATES[role] || ROLE_TEMPLATES.viewer).perms.slice(), salt, hash: await hashPw(pw, salt), active: true, createdAt: nowStamp() };
   }
-  // view/export للجميع — data: مشتريات ومدير — admin: مدير فقط. التعديل يحتاج قفل التعديل.
+  // التعديل يحتاج الصلاحية + قفل التعديل. العرض متاح للجميع.
+  const has = perm => !!ui.user && userPerms(ui.user).includes(perm);
   function can(perm) {
     if (!ui.user) return false;
-    if (perm === 'view' || perm === 'export') return true;
+    if (perm === 'view') return true;
+    if (perm === 'export') return has('export');
     if (ui.readOnly) return false;
-    if (perm === 'data') return ui.user.role === 'admin' || ui.user.role === 'purchasing';
-    if (perm === 'admin') return ui.user.role === 'admin';
-    return false;
+    return has(perm);
   }
   function deny(perm) {
-    if (ui.readOnly && ui.user.role !== 'viewer') toast('البرنامج في وضع العرض فقط — مستخدم آخر يعدّل الآن', 'bad');
-    else toast(perm === 'admin' ? 'هذه العملية تحتاج صلاحية «مدير»' : 'لا تملك صلاحية التعديل', 'bad');
+    if (ui.readOnly && has(perm)) toast('البرنامج في وضع العرض فقط — مستخدم آخر يعدّل الآن', 'bad');
+    else { const p = PERMS.find(x => x[0] === perm); toast('لا تملك صلاحية: ' + (p ? p[1] : perm), 'bad'); }
   }
   const PERM = {
-    import: 'data', newItem: 'data', bulkEdit: 'data', delMonth: 'data', clearTransit: 'data', delTransit: 'data', addTransit: 'data', defineUnit: 'data',
-    importLegacy: 'admin', approve: 'admin', addType: 'admin', delType: 'admin', addExc: 'admin', delExc: 'admin', addGroup: 'admin', renGroup: 'admin', delGroup: 'admin',
-    archDel: 'admin', restoreBackup: 'admin', resetAll: 'admin', addUser: 'admin', editUser: 'admin'
+    newItem: 'items', bulkEdit: 'items', defineUnit: 'items',
+    delMonth: 'import_data', clearTransit: 'import_data', delTransit: 'import_data', addTransit: 'import_data',
+    importLegacy: 'data_admin', restoreBackup: 'data_admin', resetAll: 'data_admin', archDel: 'data_admin', chooseShared: 'data_admin', resetDataDir: 'data_admin',
+    approve: 'approve',
+    addType: 'settings', delType: 'settings', addExc: 'settings', delExc: 'settings', addGroup: 'settings', renGroup: 'settings', delGroup: 'settings', addCur: 'settings', delCur: 'settings',
+    addUser: 'users', editUser: 'users',
+    pgExcel: 'export', pgPdf: 'export', pgPrint: 'export', tpl: 'export', tplItemsFull: 'export', exportBackup: 'export',
+    poReceive: 'po_import', poReopen: 'po_import', clearManualTransit: 'import_data', poQuickRecv: 'po_import', poQuickPay: 'po_payments', poNew: 'po_payments'
   };
-  const CHG_PERM = { adj: 'data', reason: 'data', stockDate: 'data', set: 'admin', setPct: 'admin', type: 'admin', cls: 'admin', exc: 'admin' };
+  const CHG_PERM = { adj: 'adjust', reason: 'adjust', stockDate: 'import_data', set: 'settings', setPct: 'settings', type: 'settings', cls: 'settings', exc: 'settings', cur: 'settings' };
+  const IMPORT_PERM = { items: 'items', sales: 'import_data', stock: 'import_data', transit: 'import_data', po: 'po_import', poPay: 'po_payments' };
 
   function pageAuth() {
     const first = !db.users.length;
@@ -348,10 +387,10 @@
     await startSession(usr, false);
   }
   async function startSession(usr, created) {
-    ui.user = { username: usr.username, name: usr.name, role: usr.role };
+    ui.user = { username: usr.username, name: usr.name, role: usr.role, perms: userPerms(usr).slice() };
     try { localStorage.setItem('pp_last_user', usr.username); } catch (e) { /* */ }
     ui.readOnly = true; ui.lockHolder = null;
-    if (usr.role !== 'viewer') await tryLock(true);
+    if (canEditAnything(usr)) await tryLock(true);
     if (created) {
       if (ui.readOnly) { toast('لا يمكن إنشاء المستخدم — البيانات مقفلة عند مستخدم آخر', 'bad'); ui.user = null; db.users = []; render(); return; }
       dirty = true; await saveNow();
@@ -361,7 +400,7 @@
     checkUpdate(true);
   }
   async function tryLock(silent) {
-    if (!ui.user || ui.user.role === 'viewer') return;
+    if (!ui.user || !canEditAnything(ui.user)) return;
     const r = await api.acquireLock(ui.user.username, ui.user.name);
     if (r.ok) {
       const wasRO = ui.readOnly;
@@ -386,7 +425,7 @@
     try {
       const st = await api.statDb();
       if (st.mtime && Math.abs(st.mtime - ui.mtime) > 1) { await reloadDb(); toast('تم تحديث البيانات من الملف المشترك'); }
-      if (ui.user.role !== 'viewer') {
+      if (canEditAnything(ui.user)) {
         if (!st.lock || (Date.now() - new Date(st.lock.at).getTime() > 5 * 60 * 1000)) await tryLock(false);
         else if (!ui.lockHolder || ui.lockHolder.user !== st.lock.user) { ui.lockHolder = st.lock; render(); }
       }
@@ -426,6 +465,7 @@
     items: { pdf: true, excel: true, tables: [['items', 'الأصناف']], title: () => 'الأصناف' },
     data: { pdf: true, excel: true, tables: () => [[{ sales: 'salesMat', stock: 'stockT', transit: 'transitT', units: 'unitsT' }[ui.dataTab], { sales: 'المبيعات', stock: 'المخزون', transit: 'بالطريق', units: 'وحدات غير معرفة' }[ui.dataTab]]], title: () => ({ sales: 'المبيعات', stock: 'المخزون', transit: 'بالطريق', units: 'وحدات غير معرفة' }[ui.dataTab]) },
     archive: { pdf: true, excel: true, tables: [['arch', 'الأرشيف']], title: () => 'أرشيف الطلبات' },
+    po: { pdf: true, excel: true, tables: () => ui.poTab === 'cash' ? [['cashBuckets', 'الكاش حسب الشهر'], ['cashList', 'الكاش المطلوب']] : ui.poTab === 'imports' ? [['poImports', 'سجل الاستيراد']] : [['poList', 'أوامر الشراء']], title: () => ui.poTab === 'cash' ? 'الكاش المطلوب ' + today() : 'أوامر الشراء ' + today() },
     users: { pdf: true, excel: true, tables: [['users', 'المستخدمين']], title: () => 'المستخدمين' }
   };
   function cellExport(c, r, i) {
@@ -460,10 +500,11 @@
   }
 
   function pageUsers() {
-    return `<div class="page-head"><div><h1>المستخدمين والصلاحيات</h1><div class="sub">مدير: كل شيء — مشتريات: استيراد البيانات والأصناف والتعديلات اليدوية — مشاهد: عرض وتصدير فقط</div></div>
+    return `<div class="page-head"><div><h1>المستخدمين والصلاحيات</h1><div class="sub">لكل مستخدم صلاحيات تختارها بنفسك — القوالب (مدير، مشتريات، محاسب موردين، مشاهد) تعبّيها بضغطة وتقدر تعدّل بعدها</div></div>
       <div class="actions"><button class="primary" data-act="addUser">إضافة مستخدم</button></div></div>
       ${table('users', [
-        { k: 'username', h: 'اسم المستخدم' }, { k: 'name', h: 'الاسم' }, { k: 'role', h: 'الصلاحية', v: u => ROLES[u.role] },
+        { k: 'username', h: 'اسم المستخدم' }, { k: 'name', h: 'الاسم' }, { k: 'role', h: 'الدور', v: u => roleLabel(u) },
+        { k: 'perms', h: 'الصلاحيات', cls: 'wrap', v: u => userPerms(u).map(p => (PERMS.find(x => x[0] === p) || [p, p])[1]).join('، ') },
         { k: 'active', h: 'الحالة', v: u => u.active !== false ? 'نشط' : 'موقوف' }, { k: 'createdAt', h: 'تاريخ الإنشاء', v: u => (u.createdAt || '').slice(0, 10) },
         { k: 'act', h: '', nosort: true, f: u => `<button class="sm" data-act="editUser" data-k="${esc(u.username)}">تعديل</button>` }
       ], db.users, { short: true })}
@@ -473,33 +514,46 @@
   }
   function userModal(username) {
     const u = username ? db.users.find(x => x.username === username) : null;
+    const cur = u ? userPerms(u) : ROLE_TEMPLATES.purchasing.perms;
     modal({
-      title: u ? 'تعديل مستخدم ' + esc(u.username) : 'إضافة مستخدم', size: 'narrow',
-      body: `<div class="form" style="grid-template-columns:1fr">
-        <label class="f">اسم المستخدم<input id="u_user" value="${esc(u ? u.username : '')}" ${u ? 'readonly' : ''}></label>
+      title: u ? 'تعديل مستخدم ' + esc(u.username) : 'إضافة مستخدم',
+      body: `<div class="form f2">
+        <label class="f">اسم المستخدم (للدخول)<input id="u_user" value="${esc(u ? u.username : '')}" ${u ? 'readonly' : ''}></label>
         <label class="f">الاسم الظاهر<input id="u_name" value="${esc(u ? u.name : '')}"></label>
-        <label class="f">الصلاحية<select id="u_role">${Object.entries(ROLES).map(([k, l]) => `<option value="${k}" ${u && u.role === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
         <label class="f">${u ? 'كلمة مرور جديدة (اتركها فارغة بدون تغيير)' : 'كلمة المرور'}<input id="u_pw" type="password"></label>
-        ${u ? `<label class="chk"><input type="checkbox" id="u_active" ${u.active !== false ? 'checked' : ''}> نشط</label>` : ''}
-      </div>`,
+        <label class="f">قالب صلاحيات (يعبّي الخانات تحت)<select id="u_tpl"><option value="">— اختر قالب —</option>${Object.entries(ROLE_TEMPLATES).map(([k, t]) => `<option value="${k}">${t.label}</option>`).join('')}</select></label>
+        ${u ? `<label class="chk full"><input type="checkbox" id="u_active" ${u.active !== false ? 'checked' : ''}> المستخدم نشط (إلغاء التحديد يمنعه من الدخول)</label>` : ''}
+      </div>
+      <h3>الصلاحيات <span class="small">(العرض متاح للجميع)</span></h3>
+      <div class="perm-grid">${PERMS.map(([k, l]) => `<label class="chk"><input type="checkbox" data-perm="${k}" ${cur.includes(k) ? 'checked' : ''}> ${l}</label>`).join('')}</div>
+      <div class="small" id="u_rolelbl" style="margin-top:8px"></div>`,
       foot: `<button class="primary" data-ok>حفظ</button><button data-close>إلغاء</button>`,
       onMount: m => {
+        const perms = () => [...m.qa('[data-perm]')].filter(x => x.checked).map(x => x.dataset.perm);
+        const lbl = () => { m.q('#u_rolelbl').textContent = 'الدور: ' + roleLabel({ perms: perms() }); };
+        lbl();
+        m.q('.modal-body').addEventListener('change', e => { if (e.target.dataset.perm) lbl(); });
+        m.q('#u_tpl').onchange = e => { const t = ROLE_TEMPLATES[e.target.value]; if (!t) return; m.qa('[data-perm]').forEach(x => { x.checked = t.perms.includes(x.dataset.perm); }); lbl(); };
         m.q('[data-ok]').onclick = async () => {
-          const role = m.q('#u_role').value, pw = m.q('#u_pw').value, name = m.q('#u_name').value.trim();
+          const pw = m.q('#u_pw').value, name = m.q('#u_name').value.trim(), ps = perms();
+          const role = (Object.entries(ROLE_TEMPLATES).find(([, t]) => t.perms.slice().sort().join(',') === ps.slice().sort().join(',')) || ['custom'])[0];
+          const others = db.users.filter(x => x !== u && x.active !== false && userPerms(x).includes('users'));
           if (u) {
-            const admins = db.users.filter(x => x.role === 'admin' && x.active !== false);
             const act = m.q('#u_active').checked;
-            if (u.role === 'admin' && (role !== 'admin' || !act) && admins.length <= 1) return toast('لازم يبقى مدير واحد نشط على الأقل', 'bad');
-            u.role = role; u.name = name || u.username; u.active = act;
+            if (!others.length && (!act || !ps.includes('users'))) return toast('لازم يبقى مستخدم نشط واحد على الأقل عنده صلاحية «إدارة المستخدمين»', 'bad');
+            u.role = role; u.perms = ps; u.name = name || u.username; u.active = act;
             if (pw) { if (pw.length < 4) return toast('كلمة المرور قصيرة', 'bad'); u.salt = hex(crypto.getRandomValues(new Uint8Array(16))); u.hash = await hashPw(pw, u.salt); }
-            log('تعديل المستخدم ' + u.username);
+            if (u.username === ui.user.username) ui.user.perms = ps.slice();
+            log('تعديل المستخدم ' + u.username + ' (' + roleLabel(u) + ')');
           } else {
             const un = m.q('#u_user').value.trim().toLowerCase();
             if (!/^[\w.\-\u0600-\u06FF]{2,}$/.test(un)) return toast('اسم مستخدم غير صالح', 'bad');
             if (db.users.some(x => x.username === un)) return toast('اسم المستخدم موجود', 'bad');
             if (pw.length < 4) return toast('كلمة المرور قصيرة (4 أحرف على الأقل)', 'bad');
-            db.users.push(await makeUser(un, name, role, pw));
-            log('إضافة المستخدم ' + un + ' (' + ROLES[role] + ')');
+            const nu = await makeUser(un, name, role === 'custom' ? 'viewer' : role, pw);
+            nu.role = role; nu.perms = ps;
+            db.users.push(nu);
+            log('إضافة المستخدم ' + un + ' (' + roleLabel(nu) + ')');
           }
           m.close(); commit();
         };
@@ -513,7 +567,7 @@
       foot: `<button class="primary" data-ok>حفظ</button><button data-close>إلغاء</button>`,
       onMount: m => {
         m.q('[data-ok]').onclick = async () => {
-          if (ui.readOnly) return deny('data');
+          if (ui.readOnly) return toast('البرنامج في وضع العرض فقط — مستخدم آخر يعدّل الآن', 'bad');
           const u = db.users.find(x => x.username === ui.user.username);
           if (!u || await hashPw(m.q('#p_old').value, u.salt) !== u.hash) return toast('كلمة المرور الحالية غير صحيحة', 'bad');
           const n = m.q('#p_new').value;
@@ -527,7 +581,7 @@
 
   // ================= الصفحات =================
   const PAGES = {};
-  PAGES.users = () => ui.user.role === 'admin' ? pageUsers() : '<div class="empty">لا تملك صلاحية</div>';
+  PAGES.users = () => has('users') ? pageUsers() : '<div class="empty">لا تملك صلاحية</div>';
 
   function pageWelcome() {
     return `<div class="card" style="max-width:820px;margin:40px auto">
@@ -569,6 +623,7 @@
       <div class="kpi"><div class="l">قيمة الحد الأقصى</div><div class="v">${money(t.maxValue)}</div><div class="s">${cur()}</div></div>
       <div class="kpi"><div class="l">المتاح ÷ الحد الأقصى</div><div class="v">${pct(ratio)}</div><div class="s">المخزون + بالطريق</div></div>
     </div>
+    ${cashBanner()}
     <div class="card"><h2>حسب نوع الصنف</h2>${table('dashType', [
         { k: 'key', h: 'النوع' },
         { k: 'active', h: 'نشطة', n: true }, { k: 'ordered', h: 'مطلوبة', n: true },
@@ -656,7 +711,7 @@
     { k: 'name', h: 'اسم الصنف', cls: 'wrap' },
     { k: 'mainItem', h: 'الصنف الرئيسي' },
     { k: 'type', h: 'النوع' },
-    { k: 'cls', h: 'التصنيف', f: r => `<span class="cls">${r.cls}</span>` },
+    { k: 'cls', h: 'التصنيف', f: r => `<span class="cls">${r.cls}</span>${r.clsManual ? ' <span title="تصنيف يدوي — التلقائي ' + r.clsAuto + '">✎</span>' : ''}` },
     { k: 'purchaseUnit', h: 'الوحدة' },
     { k: 'avgP', h: 'متوسط شهري', n: true, v: r => r.avg / r.pf, d: 1 },
     { k: 'stockP', h: 'المخزون', n: true, v: r => r.stock / r.pf, d: 1 },
@@ -717,7 +772,7 @@
       ...mcols,
       { k: 'total', h: 'إجمالي', n: true, d: 2 }, { k: 'avg', h: 'المتوسط', n: true, d: 2 }, { k: 'std', h: 'الانحراف', n: true, d: 2 },
       { k: 'cost', h: 'التكلفة', n: true, d: 4 }, { k: 'value6', h: 'قيمة المبيعات', n: true },
-      { k: 'cls', h: 'التصنيف', f: r => `<span class="cls">${r.cls}</span>` }, { k: 'service', h: 'الخدمة', n: true, f: r => pct(r.service) }, { k: 'z', h: 'Z', n: true, d: 3 },
+      { k: 'cls', h: 'التصنيف', f: r => `<span class="cls">${r.cls}</span>${r.clsManual ? ' ✎' : ''}` }, { k: 'clsAuto', h: 'التلقائي' }, { k: 'service', h: 'الخدمة', n: true, f: r => pct(r.service) }, { k: 'z', h: 'Z', n: true, d: 3 },
       { k: 'lead', h: 'التوصيل', n: true, d: 2 }, { k: 'extraMonths', h: 'أشهر إضافية', n: true, d: 2 },
       { k: 'expected', h: 'الطلب المتوقع', n: true, d: 1 }, { k: 'safety', h: 'مخزون الأمان', n: true, d: 1 }, { k: 'extra', h: 'المخزون الإضافي', n: true, d: 1 },
       { k: 'maxLevel', h: 'الحد الأقصى', n: true, d: 1 }, { k: 'stock', h: 'المخزون', n: true, d: 2 }, { k: 'transit', h: 'بالطريق', n: true, d: 2 },
@@ -792,7 +847,7 @@
 
   // ---------- الفحوصات ----------
   PAGES.checks = function () {
-    const links = { salesUnit: 'units', stockUnit: 'units', transitUnit: 'units', autoAdded: 'auto', noCost: 'noCost', adjNoReason: 'adj', inactiveAdj: 'adj', months: 'cycle', unknownType: 'unknownType', negStock: 'negStock' };
+    const links = { salesUnit: 'units', stockUnit: 'units', transitUnit: 'units', autoAdded: 'auto', noCost: 'noCost', adjNoReason: 'adj', inactiveAdj: 'adj', months: 'cycle', unknownType: 'unknownType', negStock: 'negStock', poOverdue: 'po', transitBoth: 'units_transit' };
     return `
     <div class="page-head"><div><h1>فحوصات جودة البيانات</h1><div class="sub">راجعها قبل اعتماد الطلب. ✗ = يجب التصحيح، ⚠ = تنبيه للمراجعة.</div></div></div>
     ${res.blocking ? `<div class="banner bad">✗ يوجد ${res.blocking} فحص غير سليم</div>` : '<div class="banner ok">✓ كل الفحوصات الأساسية سليمة</div>'}
@@ -840,7 +895,7 @@
       { k: 'purchaseUnit', h: 'وحدة الشراء', v: it => it.purchaseUnit || it.baseUnit },
       { k: 'group', h: 'المجموعة' }, { k: 'sub1', h: 'فرعية 1' }, { k: 'sub2', h: 'فرعية 2' }, { k: 'mainItem', h: 'الصنف الرئيسي' },
       { k: 'type', h: 'النوع' }, { k: 'active', h: 'النشاط', f: it => it.active !== false ? '<span class="pill ok">يعمل</span>' : '<span class="pill">لا يعمل</span>', v: it => it.active !== false ? 1 : 0 },
-      { k: 'leadOverride', h: 'توصيل خاص', n: true, d: 2 }, { k: 'extraOverride', h: 'إضافي خاص', n: true, d: 2 }, { k: 'refCost', h: 'تكلفة مرجعية', n: true, d: 4 },
+      { k: 'clsOverride', h: 'تصنيف يدوي' }, { k: 'leadOverride', h: 'توصيل خاص', n: true, d: 2 }, { k: 'extraOverride', h: 'إضافي خاص', n: true, d: 2 }, { k: 'refCost', h: 'تكلفة مرجعية', n: true, d: 4 },
       { k: 'autoAdded', h: '', f: it => it.autoAdded ? '<span class="pill warn">غير مصنف — جديد</span>' : '', v: it => it.autoAdded ? 1 : 0 }
     ], rows, { onRow: it => editItem(it.code) })}`;
   };
@@ -868,6 +923,7 @@
         <label class="f">فترة توصيل خاصة (شهر) — فارغ = حسب النوع<input id="e_lead" type="number" step="any" min="0" value="${v(it.leadOverride)}"></label>
         <label class="f">أشهر إضافية خاصة — فارغ = حسب النوع<input id="e_extra" type="number" step="any" min="0" value="${v(it.extraOverride)}"></label>
         <label class="f">تكلفة مرجعية للوحدة الأساسية (إذا لم توجد في المخزون)<input id="e_cost" type="number" step="any" min="0" value="${v(it.refCost)}"></label>
+        <label class="f">التصنيف اليدوي — فارغ = تلقائي${r ? ' (التلقائي الآن: ' + r.clsAuto + ')' : ''}<select id="e_cls" class="inp"><option value="">تلقائي</option>${db.classes.map(c => `<option value="${c.code}" ${it.clsOverride === c.code ? 'selected' : ''}>${c.code} — خدمة ${pct(c.service)}</option>`).join('')}</select></label>
         <label class="f full">ملاحظات<input id="e_notes" value="${v(it.notes)}"></label>
       </div>
       <h3>الوحدات</h3>
@@ -897,7 +953,7 @@
         m.q('#e_addunit').onclick = () => { m.q('#e_units').insertAdjacentHTML('beforeend', unitRow()); fillPU(); };
         m.q('#e_units').addEventListener('click', e => { if (e.target.closest('[data-delunit]')) { e.target.closest('tr').remove(); fillPU(); } });
         m.q('[data-save]').onclick = () => {
-          if (!can('data')) return deny('data');
+          if (!can('items')) return deny('items');
           const code2 = E.normCode(m.q('#e_code').value);
           if (!code2) return toast('رقم الصنف مطلوب', 'bad');
           if (isNew && db.items.some(x => x.code === code2)) return toast('رقم الصنف موجود مسبقًا', 'bad');
@@ -915,7 +971,7 @@
           Object.assign(it, {
             code: code2, name: m.q('#e_name').value.trim(), baseUnit: base, units, purchaseUnit: m.q('#e_pu').value === base ? '' : m.q('#e_pu').value,
             group: m.q('#e_group').value.trim() || 'غير مصنف', sub1: m.q('#e_sub1').value.trim(), sub2: m.q('#e_sub2').value.trim(), mainItem: m.q('#e_main').value.trim(),
-            type: m.q('#e_type').value, active: m.q('#e_active').value === '1', leadOverride: nb('#e_lead'), extraOverride: nb('#e_extra'), refCost: nb('#e_cost'),
+            type: m.q('#e_type').value, active: m.q('#e_active').value === '1', leadOverride: nb('#e_lead'), extraOverride: nb('#e_extra'), refCost: nb('#e_cost'), clsOverride: m.q('#e_cls').value || '',
             notes: m.q('#e_notes').value.trim(), autoAdded: false
           });
           if (isNew) { it.addedAt = today(); db.items.push(it); log('إضافة صنف ' + code2); } else log('تعديل صنف ' + code2);
@@ -924,7 +980,7 @@
         };
         const del = m.q('[data-del]');
         if (del) del.onclick = async () => {
-          if (!can('admin')) return deny('admin');
+          if (!can('data_admin')) return deny('data_admin');
           if (!await confirmBox(`حذف الصنف ${esc(it.code)} — ${esc(it.name)}؟ مبيعاته ومخزونه تبقى في البيانات لكنها لن تدخل الحساب (ستظهر في الفحوصات).<br>للإيقاف استخدم «لا يعمل» بدل الحذف.`, { ok: 'حذف', danger: true })) return;
           db.items = db.items.filter(x => x !== it); delete db.adjustments[it.code]; log('حذف صنف ' + it.code);
           m.close(); commit();
@@ -946,6 +1002,7 @@
         <label class="f">قيمة الأشهر الإضافية<input id="b_extra" type="number" step="any" min="0"></label>
         <label class="f">فترة توصيل خاصة<select id="b_leadMode"><option value="">— بدون تغيير —</option><option value="clear">مسح (حسب النوع)</option><option value="set">تحديد قيمة</option></select></label>
         <label class="f">قيمة فترة التوصيل<input id="b_lead" type="number" step="any" min="0"></label>
+        <label class="f">التصنيف اليدوي<select id="b_cls"><option value="">— بدون تغيير —</option><option value="auto">إرجاع للتلقائي</option>${db.classes.map(c => `<option value="${c.code}">${c.code}</option>`).join('')}</select></label>
         <label class="chk full"><input type="checkbox" id="b_confirm"> تأكيد التصنيف (إزالة علامة «غير مصنف — جديد»)</label>
       </div><datalist id="dl_bg">${db.groups.map(g => `<option value="${esc(g)}">`).join('')}</datalist>`,
       foot: `<button class="primary" data-ok>تطبيق على ${fmt(rows.length)} صنف</button><button data-close>إلغاء</button>`,
@@ -958,6 +1015,7 @@
             if (t) it.type = t; if (g) it.group = g; if (a) it.active = a === '1';
             if (em === 'clear') it.extraOverride = null; else if (em === 'set' && ev !== '') it.extraOverride = num(ev);
             if (lm === 'clear') it.leadOverride = null; else if (lm === 'set' && lv !== '') it.leadOverride = num(lv);
+            const bc = m.q('#b_cls').value; if (bc === 'auto') it.clsOverride = ''; else if (bc) it.clsOverride = bc;
             if (conf || t || g) it.autoAdded = false;
           }
           I.syncGroups(db); log(`تعديل جماعي ${rows.length} صنف`);
@@ -1022,7 +1080,9 @@
       <input type="search" id="qTransit" placeholder="بحث…" value="${esc(ui.f.transit.q)}" data-search="transit.q"><span class="grow"></span><span class="pill">${fmt(db.transit.length)} سطر</span></div>
       ${table('transitT', [{ k: 'code', h: 'رقم الصنف' }, { k: 'name', h: 'اسم الصنف', cls: 'wrap' }, { k: 'unit', h: 'الوحدة' }, { k: 'qty', h: 'الكمية', n: true, d: 2 }, { k: 'source', h: 'المصدر / رقم الأمر' },
         { k: 'chk', h: 'التحويل', f: r => { const it = idx.get(r.code); if (!it) return '<span class="pill bad">غير موجود</span>'; const f = E.unitFactor(it, r.unit); return f == null ? '<span class="pill bad">وحدة غير معرّفة</span>' : f === 1 ? '<span class="pill ok">أساسية</span>' : `<span class="pill brand">× ${fmt(f, 4)}</span>`; } },
-        { k: 'del', h: '', nosort: true, f: r => `<button class="sm danger" data-act="delTransit" data-i="${r._i}">حذف</button>` }], rows)}`;
+        { k: 'del', h: '', nosort: true, f: r => `<button class="sm danger" data-act="delTransit" data-i="${r._i}">حذف</button>` }], rows)}
+      <div class="card" style="margin-top:16px"><h2>من أوامر الشراء المفتوحة (تلقائي)</h2><div class="hint">الكمية المتبقية في أوامر الشراء المفتوحة تنخصم تلقائيًا كبضاعة بالطريق. للتعديل: شاشة «أوامر الشراء».</div>
+      ${table('transitPo', [{ k: 'source', h: 'أمر الشراء' }, { k: 'code', h: 'رقم الصنف' }, { k: 'name', h: 'اسم الصنف', cls: 'wrap' }, { k: 'unit', h: 'الوحدة' }, { k: 'qty', h: 'الكمية المتبقية', n: true, d: 2 }], E.openPoLines(db), { short: true, empty: 'لا توجد أوامر شراء مفتوحة' })}</div>`;
   }
   function unitIssueGroups() {
     const m = new Map();
@@ -1038,6 +1098,184 @@
     return `<div class="card"><div class="hint">أسطر بوحدة غير معرّفة للصنف لا تدخل الحساب. عرّف الوحدة بمعامل التحويل للوحدة الأساسية (مثال: الوحدة الأساسية حبة، والسطر بالكرتون = 24 حبة) أو صحّح البيانات من المصدر.</div></div>
       ${table('unitsT', [{ k: 'code', h: 'رقم الصنف' }, { k: 'name', h: 'اسم الصنف', cls: 'wrap' }, { k: 'base', h: 'الوحدة الأساسية' }, { k: 'unit', h: 'الوحدة الواردة' }, { k: 'sheets', h: 'المصدر' }, { k: 'rows', h: 'الأسطر', n: true },
         { k: 'fix', h: '', nosort: true, f: r => `<button class="sm primary" data-act="defineUnit" data-code="${esc(r.code)}" data-unit="${esc(r.unit)}">تعريف الوحدة</button> <button class="sm" data-act="editItemBtn" data-code="${esc(r.code)}">فتح الصنف</button>` }], rows, { empty: '✓ كل الوحدات معرّفة' })}`;
+  }
+
+  // ---------- أوامر الشراء والكاش ----------
+  const curName = c => (db.currencies.find(x => x.code === c) || { name: c }).name;
+  function poRows() {
+    const f = ui.f.po, q = f.q.trim().toLowerCase();
+    return E.poSummary(db, today()).filter(o =>
+      (f.status === 'الكل' || o.status === f.status) && (f.pay === 'الكل' || o.payStatus === f.pay) && (f.agent === 'الكل' || o.agent === f.agent) &&
+      (!q || o.no.toLowerCase().includes(q) || o.agent.toLowerCase().includes(q) || o.supplier.toLowerCase().includes(q) || o.note.toLowerCase().includes(q) ||
+        (db.po.orders[o.no].lines || []).some(l => l.code.toLowerCase().includes(q) || String(l.name).toLowerCase().includes(q))));
+  }
+  const payPill = s => `<span class="pill ${s === 'مسدد' ? 'ok' : s === 'مسدد جزئيًا' ? 'warn' : s === 'غير مسدد' ? 'bad' : ''}">${s}</span>`;
+  const etaCell = o => !o.eta ? '<span class="muted">—</span>' : `${esc(o.eta)}${o.etaManual ? ' ✎' : ''}${o.status === 'open' && o.daysToEta != null ? ` <span class="pill ${o.daysToEta < 0 ? 'bad' : o.daysToEta <= 30 ? 'warn' : ''}">${o.daysToEta < 0 ? 'متأخر ' + (-o.daysToEta) + ' يوم' : 'بعد ' + o.daysToEta + ' يوم'}</span>` : ''}`;
+  function cashBanner() {
+    const H = num(db.settings.cashHorizonDays) || 60;
+    const open = E.poSummary(db, today()).filter(o => o.status === 'open' && o.dueSar > 0.5);
+    if (!open.length) return '';
+    const over = open.filter(o => o.daysToEta != null && o.daysToEta < 0), soon = open.filter(o => o.daysToEta != null && o.daysToEta >= 0 && o.daysToEta <= H);
+    const sum = a => a.reduce((x, o) => x + o.dueSar, 0);
+    return `<div class="banner ${over.length ? 'bad' : 'warn'} no-print"><span class="grow">💰 كاش مطلوب لأوامر الشراء: <b>${money(sum(soon))} ${cur()}</b> خلال ${H} يوم (${fmt(soon.length)} أمر)${over.length ? ` + <b>${money(sum(over))}</b> لأوامر متأخرة (${fmt(over.length)})` : ''} — إجمالي غير المسدد ${money(sum(open))}</span><button class="sm" data-act="poTab" data-k="cash">التفاصيل</button></div>`;
+  }
+  PAGES.po = function () {
+    const tab = ui.poTab;
+    const all = E.poSummary(db, today());
+    const open = all.filter(o => o.status === 'open');
+    const tabs = [['orders', `أوامر الشراء (${fmt(open.length)} مفتوح)`], ['cash', 'الكاش المطلوب'], ['imports', 'سجل الاستيراد']];
+    const manualTransit = db.transit.length;
+    let body = '';
+    if (tab === 'cash') body = poCash(all);
+    else if (tab === 'imports') body = table('poImports', [
+      { k: 'at', h: 'الوقت', v: x => (x.at || '').replace('T', ' ').slice(0, 16) }, { k: 'kind', h: 'النوع', v: x => x.kind === 'po' ? 'تقرير أوامر الشراء' : 'شيت السداد' },
+      { k: 'date', h: 'تاريخ التقرير' }, { k: 'file', h: 'الملف' }, { k: 'user', h: 'المستخدم' }, { k: 'orders', h: 'أوامر', n: true }, { k: 'newOrders', h: 'جديد', n: true }, { k: 'closed', h: 'وصل المخزون', n: true }
+    ], (db.po.imports || []).slice().reverse(), { empty: 'لا يوجد استيراد بعد' });
+    else body = poOrdersTab();
+    return `<div class="page-head"><div><h1>أوامر الشراء والكاش المطلوب</h1><div class="sub">متابعة الأوامر بالطريق وحالة السداد — الكمية المتبقية في الأوامر المفتوحة تنخصم تلقائيًا من الطلب كبضاعة بالطريق</div></div>
+      <div class="actions"><button class="primary" data-act="import" data-k="po">استيراد أوامر الشراء (Excel / PDF)</button><button data-act="import" data-k="poPay">استيراد شيت السداد</button><button data-act="poNew">إضافة أمر يدوي</button><button data-act="tpl" data-k="po">قالب أوامر الشراء</button><button data-act="tpl" data-k="poPay">قالب السداد</button></div></div>
+      ${manualTransit && open.some(o => o.lines) ? `<div class="banner warn no-print"><span class="grow">يوجد ${fmt(manualTransit)} سطر بضاعة بالطريق مُدخل يدويًا بجانب أوامر الشراء — إذا كانت نفس الأوامر فهي تنخصم مرتين.</span><button class="sm" data-act="clearManualTransit">مسح بالطريق اليدوي</button><button class="sm" data-act="dataTabGo" data-k="transit">عرض</button></div>` : ''}
+      <div class="tabs">${tabs.map(([k, l]) => `<div class="tab ${tab === k ? 'active' : ''}" data-act="poTab" data-k="${k}">${l}</div>`).join('')}</div>${body}`;
+  };
+  function poOrdersTab() {
+    const f = ui.f.po;
+    const rows = poRows();
+    const agents = [...new Set(E.poSummary(db).map(o => o.agent).filter(Boolean))];
+    const sum = k => rows.reduce((a, o) => a + o[k], 0);
+    return `<div class="toolbar">
+      <label class="chk">الحالة <select class="inp" data-chg="filter" data-f="po.status"><option value="open" ${f.status === 'open' ? 'selected' : ''}>مفتوح (بالطريق)</option><option value="received" ${f.status === 'received' ? 'selected' : ''}>وصل المخزون</option><option value="الكل" ${f.status === 'الكل' ? 'selected' : ''}>الكل</option></select></label>
+      <label class="chk">السداد <select class="inp" data-chg="filter" data-f="po.pay">${opts(['غير مسدد', 'مسدد جزئيًا', 'مسدد', 'غير محدد'], f.pay, true)}</select></label>
+      <label class="chk">المخلّص <select class="inp" data-chg="filter" data-f="po.agent">${opts(agents, f.agent, true)}</select></label>
+      <input type="search" id="qPo" placeholder="بحث برقم الأمر أو الصنف…" value="${esc(f.q)}" data-search="po.q">
+      <span class="grow"></span><span class="pill brand">${fmt(rows.length)} أمر</span><span class="pill brand">الإجمالي ${money(sum('totalSar'))}</span><span class="pill bad">غير المسدد ${money(sum('dueSar'))} ${cur()}</span>
+    </div>
+    ${table('poList', [
+      { k: 'no', h: 'رقم الأمر', f: o => `<b>${esc(o.no)}</b>${o.flags.includes('stillInReport') ? ' <span class="pill warn" title="علّمته واصل لكنه ما زال في تقرير النظام">لا يزال في التقرير</span>' : ''}` },
+      { k: 'act', h: '', nosort: true, f: o => `${o.status === 'open' ? `<button class="sm ok" data-act="poQuickRecv" data-k="${esc(o.no)}" title="تعليم الأمر وصل المخزون">وصل</button> ` : ''}${o.dueSar > 0.5 ? `<button class="sm" data-act="poQuickPay" data-k="${esc(o.no)}" title="تسجيل دفعة">سداد</button>` : ''}` },
+      { k: 'status', h: 'الحالة', v: o => o.status === 'open' ? 'بالطريق' : 'وصل المخزون', f: o => o.status === 'open' ? '<span class="pill brand">بالطريق</span>' : `<span class="pill ok" title="${esc(o.receivedAt)} ${o.receivedBy === 'auto' ? '(تلقائي)' : '(يدوي)'}">وصل ${esc(o.receivedAt)}</span>` },
+      { k: 'lines', h: 'أصناف', n: true }, { k: 'supplier', h: 'المورد' }, { k: 'agent', h: 'المخلّص' },
+      { k: 'currency', h: 'العملة', v: o => curName(o.currency) },
+      { k: 'value', h: 'القيمة', n: true, d: 2 }, { k: 'shipping', h: 'الشحن', n: true, d: 2 },
+      { k: 'totalSar', h: 'الإجمالي ' + cur(), n: true }, { k: 'paidSar', h: 'المدفوع', n: true }, { k: 'dueSar', h: 'المتبقي للسداد', n: true, f: o => `<b>${money(o.dueSar)}</b>` },
+      { k: 'payStatus', h: 'السداد', f: o => payPill(o.payStatus) },
+      { k: 'eta', h: 'الوصول المتوقع', f: etaCell }, { k: 'firstSeen', h: 'أول ظهور' }, { k: 'note', h: 'ملاحظة', cls: 'wrap' }
+    ], rows, { sort: 'eta', dir: 1, onRow: o => poModal(o.no), empty: 'لا توجد أوامر — استورد تقرير أوامر الشراء أو شيت السداد', foot: { no: 'الإجمالي', totalSar: money(sum('totalSar')), paidSar: money(sum('paidSar')), dueSar: money(sum('dueSar')) } })}`;
+  }
+  function poCash(all) {
+    const H = ui.f.cash.horizon !== '' ? num(ui.f.cash.horizon) : (num(db.settings.cashHorizonDays) || 60);
+    const open = all.filter(o => o.status === 'open' && o.dueSar > 0.5);
+    const t = today();
+    const bucketOf = o => o.daysToEta == null ? 'بدون تاريخ' : o.daysToEta < 0 ? 'متأخر (تجاوز التاريخ)' : o.eta.slice(0, 7);
+    const m = new Map();
+    for (const o of open) { const k = bucketOf(o); if (!m.has(k)) m.set(k, { key: k, count: 0, dueSar: 0, totalSar: 0, paidSar: 0 }); const g = m.get(k); g.count++; g.dueSar += o.dueSar; g.totalSar += o.totalSar; g.paidSar += o.paidSar; }
+    const ord = k => k.startsWith('متأخر') ? '0' : k === 'بدون تاريخ' ? '9' : k;
+    const buckets = [...m.values()].sort((a, b) => ord(a.key).localeCompare(ord(b.key)));
+    let cum = 0; buckets.forEach(b => { cum += b.dueSar; b.cum = cum; });
+    const inH = open.filter(o => o.daysToEta != null && o.daysToEta <= H);
+    const sum = (a, k = 'dueSar') => a.reduce((x, o) => x + o[k], 0);
+    const over = open.filter(o => o.daysToEta != null && o.daysToEta < 0);
+    const byCur = new Map(); for (const o of inH) byCur.set(o.currency, (byCur.get(o.currency) || 0) + o.dueSar / o.rate);
+    const agentRows = [...inH.reduce((mm, o) => { const k = o.agent || '—'; const g = mm.get(k) || { key: k, count: 0, dueSar: 0 }; g.count++; g.dueSar += o.dueSar; mm.set(k, g); return mm; }, new Map()).values()];
+    return `<div class="toolbar"><label class="chk">خلال <select class="inp" data-chg="filter" data-f="cash.horizon">${[30, 60, 90, 120, 180, 365].map(d => `<option value="${d}" ${d === H ? 'selected' : ''}>${d} يوم</option>`).join('')}</select></label><span class="small">من اليوم ${esc(t)} — الأوامر المفتوحة غير المسددة بالكامل، حسب تاريخ الوصول المتوقع</span></div>
+      <div class="kpis" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+        <div class="kpi"><div class="l">مطلوب خلال ${H} يوم (شامل المتأخر)</div><div class="v">${money(sum(inH))}</div><div class="s">${cur()} — ${fmt(inH.length)} أمر${[...byCur].map(([c, v]) => c !== db.currencies[0].code ? ` — ${money(v)} ${esc(curName(c))}` : '').join('')}</div></div>
+        <div class="kpi"><div class="l">منها متأخر</div><div class="v" style="color:var(--bad)">${money(sum(over))}</div><div class="s">${fmt(over.length)} أمر تجاوز تاريخ الوصول</div></div>
+        <div class="kpi"><div class="l">بعد ${H} يوم</div><div class="v">${money(sum(open.filter(o => o.daysToEta != null && o.daysToEta > H)))}</div><div class="s">${cur()}</div></div>
+        <div class="kpi"><div class="l">إجمالي غير المسدد</div><div class="v">${money(sum(open))}</div><div class="s">${fmt(open.length)} أمر — المدفوع مقدمًا ${money(sum(all.filter(o => o.status === 'open'), 'paidSar'))}</div></div>
+      </div>
+      <div class="grid g2">
+        <div class="card"><h2>حسب شهر الوصول</h2>${table('cashBuckets', [
+          { k: 'key', h: 'الشهر', v: b => /^\d{4}-\d{2}$/.test(b.key) ? monthLabel(b.key) : b.key }, { k: 'count', h: 'أوامر', n: true },
+          { k: 'totalSar', h: 'الإجمالي', n: true }, { k: 'paidSar', h: 'مدفوع مقدمًا', n: true }, { k: 'dueSar', h: 'المطلوب', n: true, f: b => `<b>${money(b.dueSar)}</b>` }, { k: 'cum', h: 'تراكمي', n: true }
+        ], buckets, { short: true, nofilter: true, empty: 'لا يوجد كاش مطلوب' })}</div>
+        <div class="card"><h2>حسب المخلّص (خلال ${H} يوم)</h2>${table('cashAgents', [{ k: 'key', h: 'المخلّص' }, { k: 'count', h: 'أوامر', n: true }, { k: 'dueSar', h: 'المطلوب', n: true }], agentRows, { short: true, nofilter: true, sort: 'dueSar' })}</div>
+      </div>
+      <div class="card"><h2>الأوامر المطلوب سدادها خلال ${H} يوم</h2>${table('cashList', [
+        { k: 'eta', h: 'الوصول المتوقع', f: etaCell }, { k: 'no', h: 'رقم الأمر' }, { k: 'agent', h: 'المخلّص' }, { k: 'supplier', h: 'المورد' }, { k: 'currency', h: 'العملة', v: o => curName(o.currency) },
+        { k: 'total', h: 'الإجمالي بالعملة', n: true, d: 2 }, { k: 'totalSar', h: 'الإجمالي ' + cur(), n: true }, { k: 'paidSar', h: 'مدفوع', n: true }, { k: 'dueSar', h: 'المطلوب', n: true, f: o => `<b>${money(o.dueSar)}</b>` },
+        { k: 'payStatus', h: 'السداد', f: o => payPill(o.payStatus) }, { k: 'note', h: 'ملاحظة', cls: 'wrap' }
+      ], inH, { sort: 'eta', dir: 1, onRow: o => poModal(o.no), empty: 'لا يوجد', foot: { no: 'الإجمالي', totalSar: money(sum(inH, 'totalSar')), paidSar: money(sum(inH, 'paidSar')), dueSar: money(sum(inH)) } })}</div>`;
+  }
+  function poImportResult(kind, r, msg) {
+    const list = (title, arr) => arr.length ? `<h3>${title} (${fmt(arr.length)})</h3><div class="small" style="line-height:1.9">${arr.map(esc).join('، ')}</div>` : '';
+    const body = kind === 'po'
+      ? list('أوامر جديدة', r.newOrders) + list('وصل المخزون (اختفى من التقرير)', r.closed) + list('وصل المخزون (الكمية المتبقية صفر)', r.completed) + list('أعيد فتحها (رجعت للتقرير)', r.reopened) +
+        (r.added.length ? `<div class="banner warn" style="margin-top:10px">أضيف ${fmt(r.added.length)} صنف غير موجود كـ «غير مصنف»: ${r.added.map(a => esc(a.code)).join('، ')}</div>` : '') +
+        (db.transit.length ? `<div class="banner warn" style="margin-top:10px">يوجد ${fmt(db.transit.length)} سطر بضاعة بالطريق مُدخل يدويًا — إذا كانت نفس هذه الأوامر امسحها حتى لا تنخصم مرتين.</div>` : '')
+      : list('أوامر جديدة من الشيت (بدون أصناف)', r.created) + (r.fromNote.length ? `<div class="banner warn" style="margin-top:10px">دفعات أُخذت من نص الملاحظة — راجع مبلغها وعملتها: ${r.fromNote.map(esc).join('، ')}</div>` : '');
+    modal({
+      title: kind === 'po' ? 'نتيجة استيراد أوامر الشراء' : 'نتيجة استيراد شيت السداد',
+      body: `<div class="banner ok">${esc(msg)}</div>${body}`,
+      foot: `<button class="primary" data-close>تم</button>${kind === 'po' && db.transit.length && can('import_data') ? '<button class="danger" data-clr>مسح بالطريق اليدوي</button>' : ''}`,
+      onMount: m => { const b = m.q('[data-clr]'); if (b) b.onclick = () => { db.transit = []; log('مسح البضاعة بالطريق اليدوية بعد استيراد أوامر الشراء'); m.close(); commit(); }; }
+    });
+  }
+  function poModal(no) {
+    const o = db.po.orders[no]; if (!o) return;
+    const sm = E.poSummary(db, today()).find(x => x.no === no);
+    const canPay = can('po_payments'), canSt = can('po_import') || can('po_payments');
+    const dis = c => c ? '' : 'disabled';
+    const auto = E.poAutoEta(db, o);
+    modal({
+      title: `أمر الشراء ${esc(no)}`, size: 'wide',
+      body: `<div class="row-flex" style="margin-bottom:12px">${o.status === 'open' ? '<span class="pill brand">بالطريق</span>' : `<span class="pill ok">وصل المخزون ${esc(o.receivedAt || '')} ${o.receivedBy === 'auto' ? '(تلقائي: ' + esc(o.receivedNote || '') + ')' : '(يدوي)'}</span>`}${payPill(sm.payStatus)}<span class="small">أول ظهور ${esc(o.firstSeen || '—')} — آخر تحديث ${esc(o.lastSeen || '—')}</span></div>
+      <div class="calc-grid">
+        <div class="c"><div class="l">الإجمالي (قيمة + شحن)</div><div class="v">${fmt(sm.total, 2)} ${esc(curName(sm.currency))}</div></div>
+        <div class="c"><div class="l">بالعملة الأساسية</div><div class="v">${money(sm.totalSar)} ${cur()}</div></div>
+        <div class="c"><div class="l">المدفوع</div><div class="v">${money(sm.paidSar)}</div></div>
+        <div class="c"><div class="l">المتبقي للسداد</div><div class="v" style="color:var(--bad)">${money(sm.dueSar)}</div></div>
+      </div>
+      <div class="form f4" style="margin-top:12px">
+        <label class="f">المورد<input id="o_sup" value="${esc(o.supplier || '')}" ${dis(canPay)}></label>
+        <label class="f">المخلّص<input id="o_agent" value="${esc(o.agent || '')}" ${dis(canPay)}></label>
+        <label class="f">العملة<select id="o_cur" ${dis(canPay)}>${db.currencies.map(c => `<option value="${esc(c.code)}" ${o.currency === c.code ? 'selected' : ''}>${esc(c.name)} (${c.rate})</option>`).join('')}</select></label>
+        <label class="f">سعر صرف خاص (فارغ = من الإعدادات)<input id="o_rate" type="number" step="any" value="${o.rate || ''}" ${dis(canPay)}></label>
+        <label class="f">رسوم الشحن (بعملة الأمر)<input id="o_ship" type="number" step="any" value="${o.shipping || ''}" ${dis(canPay)}></label>
+        ${(o.lines || []).length ? '' : `<label class="f">قيمة الأمر (بدون أصناف)<input id="o_val" type="number" step="any" value="${o.manualValue || ''}" ${dis(canPay)}></label>`}
+        <label class="f">الوصول المتوقع — فارغ = تلقائي (${esc(auto || '—')})<input id="o_eta" type="date" value="${esc(o.etaManual ? o.eta : '')}" ${dis(canSt)}></label>
+        <label class="f full">ملاحظة<input id="o_note" value="${esc(o.note || '')}" ${dis(canPay || canSt)}></label>
+      </div>
+      <h3>الدفعات</h3>
+      ${table('poPays', [
+        { k: 'date', h: 'التاريخ' }, { k: 'kind', h: 'النوع' }, { k: 'amount', h: 'المبلغ', n: true, d: 2 }, { k: 'currency', h: 'العملة', v: p => curName(p.currency || o.currency) },
+        { k: 'note', h: 'ملاحظة', cls: 'wrap', f: p => esc(p.note || '') + (p.review ? ' <span class="pill warn">راجع</span>' : '') + (p.source === 'sheet' ? ' <span class="pill">من الشيت</span>' : '') }, { k: 'by', h: 'بواسطة' },
+        { k: 'del', h: '', nosort: true, f: p => canPay ? `<button class="sm danger" data-delpay="${esc(p.id)}">حذف</button>` : '' }
+      ], o.payments || [], { static: true, short: true, empty: 'لا توجد دفعات' })}
+      ${canPay ? `<div class="form f4" style="margin-top:10px;align-items:end">
+        <label class="f">التاريخ<input id="p_date" type="date" value="${today()}"></label>
+        <label class="f">النوع<select id="p_kind"><option>عربون</option><option>دفعة</option><option>سداد كامل</option><option>شحن</option></select></label>
+        <label class="f">المبلغ<input id="p_amt" type="number" step="any"></label>
+        <label class="f">العملة<select id="p_cur">${db.currencies.map(c => `<option value="${esc(c.code)}" ${o.currency === c.code ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+        <label class="f full">ملاحظة الدفعة<input id="p_note"></label>
+        <button class="primary" id="p_add">+ إضافة دفعة</button><button id="p_full">سداد المتبقي بالكامل</button>
+      </div>` : ''}
+      <h3>الأصناف</h3>
+      ${table('poLines', [{ k: 'code', h: 'رقم الصنف' }, { k: 'name', h: 'اسم الصنف', cls: 'wrap', v: l => { const it = db.items.find(i => i.code === l.code); return it ? it.name : l.name; } }, { k: 'unit', h: 'الوحدة' },
+        { k: 'qty', h: 'كمية الأمر', n: true }, { k: 'invQty', h: 'المستلم', n: true }, { k: 'remaining', h: 'المتبقي (بالطريق)', n: true }, { k: 'value', h: 'القيمة', n: true, d: 2 }], o.lines || [], { static: true, short: true, empty: 'الأمر بدون أصناف (من شيت السداد فقط)' })}`,
+      foot: `<button class="primary" data-save ${canPay || canSt ? '' : 'disabled'}>حفظ</button><button data-close>إغلاق</button><span class="grow"></span>${canSt ? (o.status === 'open' ? '<button class="ok" data-recv>وصل المخزون</button>' : '<button data-reopen>إعادة فتح (لم يصل)</button>') : ''}${can('data_admin') ? '<button class="danger" data-delpo>حذف الأمر</button>' : ''}`,
+      onMount: m => {
+        const save = () => {
+          if (canPay) {
+            o.supplier = m.q('#o_sup').value.trim(); o.agent = m.q('#o_agent').value.trim(); o.currency = m.q('#o_cur').value;
+            o.rate = m.q('#o_rate').value === '' ? null : num(m.q('#o_rate').value); o.shipping = num(m.q('#o_ship').value);
+            if (m.q('#o_val')) o.manualValue = num(m.q('#o_val').value);
+          }
+          if (canSt) { const e = m.q('#o_eta').value; o.eta = e; o.etaManual = !!e; }
+          if (canPay || canSt) o.note = m.q('#o_note').value.trim();
+        };
+        m.q('[data-save]').onclick = () => { save(); log('تعديل أمر الشراء ' + no); m.close(); commit(); toast('تم الحفظ', 'ok'); };
+        const reopenModal = () => { m.close(); commit(); poModal(no); };
+        const add = (amt, kind, curc, note, date) => { o.payments = o.payments || []; o.payments.push({ id: 'P' + Date.now(), date, amount: amt, currency: curc, kind, note, source: 'manual', by: ui.user.name }); log(`دفعة ${fmt(amt, 2)} ${curc} لأمر الشراء ${no}`); };
+        const pa = m.q('#p_add');
+        if (pa) pa.onclick = () => { const a = num(m.q('#p_amt').value); if (!(a > 0)) return toast('أدخل المبلغ', 'bad'); save(); add(a, m.q('#p_kind').value, m.q('#p_cur').value, m.q('#p_note').value.trim(), m.q('#p_date').value || today()); reopenModal(); };
+        const pf = m.q('#p_full');
+        if (pf) pf.onclick = () => { save(); const x = E.poSummary(db, today()).find(y => y.no === no); if (!(x.dueSar > 0.5)) return toast('لا يوجد متبقي'); add(+(x.dueSar / x.rate).toFixed(2), 'سداد كامل', o.currency, m.q('#p_note').value.trim(), m.q('#p_date').value || today()); reopenModal(); };
+        m.q('.modal-body').addEventListener('click', e => { const b = e.target.closest('[data-delpay]'); if (!b) return; save(); o.payments = o.payments.filter(p => p.id !== b.dataset.delpay); log('حذف دفعة من أمر الشراء ' + no); reopenModal(); });
+        const rv = m.q('[data-recv]'); if (rv) rv.onclick = () => { save(); o.status = 'received'; o.receivedAt = today(); o.receivedBy = 'manual'; o.receivedNote = 'يدوي — ' + ui.user.name; log('أمر الشراء ' + no + ' وصل المخزون (يدوي)'); m.close(); commit(); };
+        const ro = m.q('[data-reopen]'); if (ro) ro.onclick = () => { save(); o.status = 'open'; o.receivedAt = ''; o.receivedBy = ''; o.flags = (o.flags || []).filter(f => f !== 'stillInReport'); log('إعادة فتح أمر الشراء ' + no); m.close(); commit(); };
+        const dp = m.q('[data-delpo]'); if (dp) dp.onclick = async () => { if (!await confirmBox(`حذف أمر الشراء ${esc(no)} نهائيًا مع دفعاته؟`, { ok: 'حذف', danger: true })) return; delete db.po.orders[no]; log('حذف أمر الشراء ' + no); m.close(); commit(); };
+      }
+    });
   }
 
   // ---------- الأرشيف ----------
@@ -1078,10 +1316,11 @@
 
     <div class="card"><h2>أنواع الأصناف — فترة التوصيل والفترة الإضافية</h2>
       <div class="hint">«الفترة الإضافية» = أشهر مخزون فوق السياسة بقرار الإدارة، ثابتة لين تغيّرها. يمكن تحديد قيمة خاصة لصنف من شاشة الصنف.</div>
-      <div style="overflow:auto"><table class="t" style="margin-top:8px"><thead><tr><th>النوع</th><th>فترة التوصيل (شهر)</th><th>أشهر إضافية</th><th>ملاحظة</th><th>أصناف</th><th></th></tr></thead><tbody>
+      <div style="overflow:auto"><table class="t" style="margin-top:8px"><thead><tr><th>النوع</th><th>فترة التوصيل (شهر)</th><th>أشهر إضافية</th><th>عملة الشراء</th><th>ملاحظة</th><th>أصناف</th><th></th></tr></thead><tbody>
       ${db.types.map((t, i) => `<tr><td><input class="inp" style="width:100px" data-chg="type" data-i="${i}" data-k="name" value="${esc(t.name)}"></td>
         <td><input class="inp" style="width:80px" type="number" step="any" min="0" data-chg="type" data-i="${i}" data-k="leadTime" value="${t.leadTime}"></td>
         <td><input class="inp" style="width:80px" type="number" step="any" min="0" data-chg="type" data-i="${i}" data-k="extraMonths" value="${t.extraMonths}"></td>
+        <td><select class="inp" data-chg="type" data-i="${i}" data-k="currency">${db.currencies.map(c => `<option value="${esc(c.code)}" ${t.currency === c.code ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></td>
         <td><input style="width:90px" data-chg="type" data-i="${i}" data-k="note" value="${esc(t.note || '')}"></td>
         <td class="n">${fmt(db.items.filter(x => x.type === t.name).length)}</td>
         <td><button class="sm danger" data-act="delType" data-i="${i}">حذف</button></td></tr>`).join('')}
@@ -1093,6 +1332,14 @@
       <table class="t" style="margin-top:8px"><thead><tr><th>التصنيف</th><th>مستوى الخدمة %</th><th class="n">Z</th><th class="n">أصناف</th></tr></thead><tbody>
       ${db.classes.map((c, i) => `<tr><td><span class="cls">${c.code}</span></td><td><input class="inp" style="width:90px" type="number" step="any" min="0" max="99.99" data-chg="cls" data-i="${i}" value="${+(c.service * 100).toFixed(4)}"></td><td class="n">${fmt(E.normsinv(c.service), 4)}</td><td class="n">${fmt(res.rows.filter(r => r.cls === c.code).length)}</td></tr>`).join('')}
       </tbody></table></div>
+    </div>
+
+    <div class="card"><h2>العملات وأسعار الصرف (لأوامر الشراء والكاش)</h2>
+      <div class="hint">كل المبالغ تتحول للعملة الأساسية (${esc(cur())}) بسعر الصرف هنا. تقدر تحدد سعر صرف خاص لأمر معيّن من شاشة الأمر.</div>
+      <table class="t" style="margin-top:8px;max-width:620px"><thead><tr><th>الرمز</th><th>الاسم</th><th>سعر الصرف (= كم ${esc(cur())})</th><th></th></tr></thead><tbody>
+      ${db.currencies.map((c, i) => `<tr><td><input class="inp" style="width:80px" data-chg="cur" data-i="${i}" data-k="code" value="${esc(c.code)}"></td><td><input class="inp" style="width:120px" data-chg="cur" data-i="${i}" data-k="name" value="${esc(c.name)}"></td><td><input class="inp" style="width:100px" type="number" step="any" min="0" data-chg="cur" data-i="${i}" data-k="rate" value="${c.rate}"></td><td>${i ? `<button class="sm danger" data-act="delCur" data-i="${i}">حذف</button>` : '<span class="small">الأساسية</span>'}</td></tr>`).join('')}
+      </tbody></table><button class="sm" data-act="addCur" style="margin-top:8px">+ إضافة عملة</button>
+      <div class="form f4" style="margin-top:12px"><label class="f">أفق الكاش المطلوب (يوم)<input class="inp" type="number" step="1" min="1" data-chg="set" data-k="cashHorizonDays" value="${esc(s.cashHorizonDays)}"></label></div>
     </div>
 
     <div class="card"><h2>الفترات الاستثنائية المؤقتة</h2>
@@ -1163,7 +1410,11 @@
     const s = db.settings;
     const defMonth = s.lastMonth ? monthAdd(s.lastMonth, 1) : new Date().toISOString().slice(0, 7);
     const colName = c => { let n = '', x = c + 1; while (x > 0) { const m = (x - 1) % 26; n = String.fromCharCode(65 + m) + n; x = Math.floor((x - 1) / 26); } return n; };
+    const keyField = kind === 'po' || kind === 'poPay' ? 'poNo' : 'code';
+    const curHint = () => { const hdr = sheets[st.si].rows[st.det.row] || []; return I.currencyFromHeader(hdr[st.det.map.value] || hdr[st.det.map.shipping] || ''); };
     const optionsHtml = () => {
+      if (kind === 'po') return `<label class="f">تاريخ التقرير<input type="date" class="inp" id="w_date" value="${today()}"></label><div class="small" style="margin-top:22px">التقرير = كل الأوامر المفتوحة الآن. الأمر المفتوح اللي مو موجود فيه يتحول «وصل المخزون».</div>`;
+      if (kind === 'poPay') return `<div class="small full" style="margin-top:22px">دفعات «من الشيت» تُستبدل في كل استيراد، والدفعات اللي سجلتها يدويًا تبقى.</div>`;
       if (kind === 'sales') return `<label class="f">شهر المبيعات (إذا الملف ما فيه عمود شهر)<input type="month" class="inp" id="w_month" value="${defMonth}"></label>
         <label class="chk" style="margin-top:22px"><input type="checkbox" id="w_setLast" checked> تحديث «آخر شهر في التحليل» لهذا الشهر إذا كان أحدث</label>`;
       if (kind === 'stock') return `<label class="f">تاريخ رصيد المخزون<input type="date" class="inp" id="w_date" value="${today()}"></label>`;
@@ -1179,11 +1430,12 @@
       const hdr = rows[st.det.row] || [];
       const colOpts = sel => `<option value="-1">— لا يوجد —</option>` + Array.from({ length: ncol }, (_, c) => `<option value="${c}" ${sel === c ? 'selected' : ''}>${colName(c)}: ${esc(hdr[c] == null ? '' : String(hdr[c]).slice(0, 30))}</option>`).join('');
       m.q('#w_map').innerHTML = K.fields.map(f => `<label class="f">${f.label}${f.required ? ' *' : ''}<select data-field="${f.key}">${colOpts(st.det.map[f.key] != null ? st.det.map[f.key] : -1)}</select></label>`).join('');
-      const recs = I.rowsToRecords(rows, st.det.row, st.det.map);
+      const recs = I.rowsToRecords(rows, st.det.row, st.det.map, keyField);
       const known = new Set(db.items.map(i => i.code));
-      const newCodes = kind === 'items' ? 0 : new Set(recs.filter(r => !known.has(r.code)).map(r => r.code)).size;
+      const newCodes = kind === 'items' || kind === 'poPay' ? 0 : new Set(recs.filter(r => r.code && !known.has(r.code)).map(r => r.code)).size;
+      const poInfo = kind === 'po' ? (() => { const nos = new Set(recs.filter(r => /\d/.test(r.poNo || '')).map(r => r.poNo)); const open = Object.values(db.po.orders).filter(o => o.status === 'open' && (o.lines || []).length); const gone = open.filter(o => !nos.has(o.no)).length; return ` — ${fmt(nos.size)} أمر، منها ${fmt([...nos].filter(n => !db.po.orders[n]).length)} جديد${gone ? ` — <b style="color:var(--warn)">${fmt(gone)} أمر مفتوح غير موجود في الملف سيتحول «وصل المخزون»</b>` : ''}`; })() : kind === 'poPay' ? ` — ${fmt(new Set(recs.map(r => r.poNo)).size)} أمر${curHint() ? ' — العملة من العنوان: ' + curHint() : ''}` : '';
       const shown = K.fields.filter(f => st.det.map[f.key] != null && st.det.map[f.key] >= 0);
-      m.q('#w_prev').innerHTML = `<div class="small" style="margin-bottom:6px">${fmt(recs.length)} سطر صالح${newCodes ? ` — <b style="color:var(--warn)">${fmt(newCodes)} صنف غير موجود سيُضاف تلقائيًا كـ «غير مصنف»</b>` : ''}</div>
+      m.q('#w_prev').innerHTML = `<div class="small" style="margin-bottom:6px">${fmt(recs.length)} سطر صالح${poInfo}${newCodes ? ` — <b style="color:var(--warn)">${fmt(newCodes)} صنف غير موجود سيُضاف تلقائيًا كـ «غير مصنف»</b>` : ''}</div>
         <div class="tbl-wrap short" style="max-height:260px"><table class="t"><thead><tr>${shown.map(f => `<th>${f.label}</th>`).join('')}</tr></thead><tbody>
         ${recs.slice(0, 8).map(r => `<tr>${shown.map(f => { let v = r[f.key]; if (v instanceof Date) v = v.toISOString().slice(0, 10); return `<td>${esc(v)}</td>`; }).join('')}</tr>`).join('')}</tbody></table></div>`;
       m.q('#w_hdr').value = st.det.row + 1;
@@ -1211,8 +1463,19 @@
         });
         m.q('[data-ok]').onclick = async () => {
           for (const f of K.fields) if (f.required && !(st.det.map[f.key] >= 0)) return toast(`حدد عمود «${f.label}»`, 'bad');
+          if (kind === 'po' || kind === 'poPay') {
+            const recs0 = I.rowsToRecords(sheets[st.si].rows, st.det.row, st.det.map, keyField);
+            if (!recs0.length) return toast('لا توجد أسطر صالحة', 'bad');
+            await saveNow(); await api.snapshot('before-import-' + kind);
+            const opt = { date: kind === 'po' ? m.q('#w_date').value : today(), user: ui.user.name, file: wb.name, currencyHint: curHint() };
+            const r = kind === 'po' ? I.applyPOs(db, recs0, opt) : I.applyPOPay(db, recs0, opt);
+            const msg = kind === 'po' ? `أوامر الشراء: ${fmt(r.orders)} أمر (${fmt(r.lines)} سطر) — جديد ${fmt(r.newOrders.length)} — وصل المخزون ${fmt(r.closed.length + r.completed.length)}${r.reopened.length ? ' — أعيد فتح ' + fmt(r.reopened.length) : ''}` : `سداد أوامر الشراء: ${fmt(r.orders)} أمر — مسدد بالكامل ${fmt(r.paidFull)} — دفعات من الملاحظات ${fmt(r.fromNote.length)}${r.created.length ? ' — أوامر جديدة ' + fmt(r.created.length) : ''}`;
+            log(msg); m.close(); ui.page = 'po'; ui.poTab = 'orders'; commit(); await saveNow();
+            poImportResult(kind, r, msg);
+            return;
+          }
           if (kind === 'sales' && !(st.det.map.issued >= 0) && !(st.det.map.net >= 0)) return toast('حدد عمود «المنصرف» أو «صافي المبيعات»', 'bad');
-          const recs = I.rowsToRecords(sheets[st.si].rows, st.det.row, st.det.map);
+          const recs = I.rowsToRecords(sheets[st.si].rows, st.det.row, st.det.map, keyField);
           if (!recs.length) return toast('لا توجد أسطر صالحة', 'bad');
           await saveNow(); await api.snapshot('before-import-' + kind);
           let msg = '', added = [];
@@ -1353,7 +1616,9 @@
       items: 'وحدة 2/3/4 + معامل = كم وحدة أساسية في هذه الوحدة (مثال: كرتون = 24). نشاط الصنف: يعمل / لا يعمل. فترة توصيل خاصة وأشهر إضافية: فارغ = حسب النوع.',
       sales: 'الشهر اختياري (مثال 2026-11) — إذا تركته فارغًا تختاره عند الاستيراد. الصافي = المنصرف − الوارد.',
       stock: 'الوحدة يجب أن تكون الوحدة الأساسية أو وحدة معرّفة للصنف.',
-      transit: 'أوامر الشراء اللي لسه ما وصلت.'
+      transit: 'أوامر الشراء اللي لسه ما وصلت.',
+      po: 'سطر لكل صنف في أمر الشراء. ارفع كل الأوامر المفتوحة في كل مرة: الأمر المفتوح اللي ما يكون في الملف يتحول «وصل المخزون». القيمة = إجمالي السطر بعملة الأمر.',
+      poPay: 'سطر لكل أمر. حالة السداد: تم السداد / لم يتم السداد. المبلغ المدفوع (اختياري) للسداد الجزئي أو العربون. التاريخ بصيغة 2026-12-31.'
     };
     return { sheets: [{ name: K.title, title: 'قالب ' + K.title, subtitle: notes[kind], columns: cols, rows }] };
   }
@@ -1440,7 +1705,7 @@
     addUser: () => userModal(null),
     editUser: el => userModal(el.dataset.k),
     chooseShared: async () => {
-      if (ui.user && ui.user.role !== 'admin') return deny('admin');
+      if (ui.user && !can('data_admin')) return deny('data_admin');
       const r = await api.chooseDir('اختر المجلد المشترك على Google Drive');
       if (!r) return;
       let mode = 'use';
@@ -1457,11 +1722,56 @@
       if (!await confirmBox('الرجوع لمجلد البيانات المحلي على هذا الجهاز؟ (الملف المشترك لا يُحذف)', { ok: 'رجوع' })) return;
       await api.setDataDir(null, 'default'); location.reload();
     },
+    poTab: el => { ui.poTab = el.dataset.k; go('po'); },
+    poQuickRecv: async el => {
+      const no = el.dataset.k, o = db.po.orders[no];
+      if (!await confirmBox(`تعليم أمر الشراء ${esc(no)} «وصل المخزون»؟ كميته المتبقية تنشال من البضاعة بالطريق.`, { ok: 'وصل المخزون' })) return;
+      o.status = 'received'; o.receivedAt = today(); o.receivedBy = 'manual'; o.receivedNote = 'يدوي — ' + ui.user.name; log('أمر الشراء ' + no + ' وصل المخزون (يدوي)'); ui.keepScroll = true; commit();
+    },
+    poQuickPay: el => {
+      const no = el.dataset.k, o = db.po.orders[no], sm = E.poSummary(db, today()).find(x => x.no === no);
+      modal({
+        title: `سداد أمر الشراء ${esc(no)}`, size: 'narrow',
+        body: `<p>المتبقي: <b>${fmt(sm.dueSar / sm.rate, 2)} ${esc(curName(o.currency))}</b> (${money(sm.dueSar)} ${cur()})</p><div class="form" style="grid-template-columns:1fr">
+          <label class="f">النوع<select id="q_kind"><option>دفعة</option><option>عربون</option><option>سداد كامل</option><option>شحن</option></select></label>
+          <label class="f">المبلغ<input id="q_amt" type="number" step="any" value="${+(sm.dueSar / sm.rate).toFixed(2)}"></label>
+          <label class="f">العملة<select id="q_cur">${db.currencies.map(c => `<option value="${esc(c.code)}" ${o.currency === c.code ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+          <label class="f">التاريخ<input id="q_date" type="date" value="${today()}"></label><label class="f">ملاحظة<input id="q_note"></label></div>`,
+        foot: `<button class="primary" data-ok>تسجيل الدفعة</button><button data-close>إلغاء</button>`,
+        onMount: m => { m.q('[data-ok]').onclick = () => {
+          const a = num(m.q('#q_amt').value); if (!(a > 0)) return toast('أدخل المبلغ', 'bad');
+          o.payments = o.payments || []; o.payments.push({ id: 'P' + Date.now(), date: m.q('#q_date').value || today(), amount: a, currency: m.q('#q_cur').value, kind: m.q('#q_kind').value, note: m.q('#q_note').value.trim(), source: 'manual', by: ui.user.name });
+          log(`دفعة ${fmt(a, 2)} ${m.q('#q_cur').value} لأمر الشراء ${no}`); m.close(); ui.keepScroll = true; commit();
+        }; }
+      });
+    },
+    poNew: () => {
+      modal({
+        title: 'إضافة أمر شراء يدوي', size: 'narrow',
+        body: `<div class="form" style="grid-template-columns:1fr">
+          <label class="f">رقم الأمر<input id="n_no"></label>
+          <label class="f">العملة<select id="n_cur">${db.currencies.map(c => `<option value="${esc(c.code)}">${esc(c.name)}</option>`).join('')}</select></label>
+          <label class="f">قيمة الأمر<input id="n_val" type="number" step="any"></label><label class="f">رسوم الشحن<input id="n_ship" type="number" step="any"></label>
+          <label class="f">المورد<input id="n_sup"></label><label class="f">المخلّص<input id="n_agent"></label>
+          <label class="f">الوصول المتوقع<input id="n_eta" type="date"></label><label class="f">ملاحظة<input id="n_note"></label></div>
+          <p class="small">الأصناف والكميات تنضاف من استيراد تقرير أوامر الشراء أو القالب. الأمر اليدوي بدون أصناف يدخل الكاش فقط.</p>`,
+        foot: `<button class="primary" data-ok>إضافة</button><button data-close>إلغاء</button>`,
+        onMount: m => { m.q('[data-ok]').onclick = () => {
+          const no = E.normCode(m.q('#n_no').value); if (!no) return toast('رقم الأمر مطلوب', 'bad');
+          if (db.po.orders[no]) return toast('رقم الأمر موجود', 'bad');
+          const eta = m.q('#n_eta').value;
+          db.po.orders[no] = { no, status: 'open', firstSeen: today(), lastSeen: today(), currency: m.q('#n_cur').value, lines: [], payments: [], manualValue: num(m.q('#n_val').value), shipping: num(m.q('#n_ship').value), supplier: m.q('#n_sup').value.trim(), agent: m.q('#n_agent').value.trim(), note: m.q('#n_note').value.trim(), eta, etaManual: !!eta, flags: [] };
+          log('إضافة أمر شراء يدوي ' + no); m.close(); commit(); poModal(no);
+        }; }
+      });
+    },
+    dataTabGo: el => { ui.dataTab = el.dataset.k; go('data'); },
+    clearManualTransit: async () => { if (!await confirmBox(`مسح ${fmt(db.transit.length)} سطر بضاعة بالطريق مُدخل يدويًا؟ (أوامر الشراء تبقى)`, { ok: 'مسح', danger: true })) return; db.transit = []; log('مسح البضاعة بالطريق اليدوية'); commit(); },
     clearColF: el => { const t = ui.tables[el.dataset.t]; t.filters = {}; t.page = 0; render(); },
     sort: el => { const t = ui.tables[el.dataset.t]; if (t.sort === el.dataset.k) t.dir = -t.dir; else { t.sort = el.dataset.k; t.dir = -1; } t.page = 0; render(); },
     page: el => { ui.tables[el.dataset.t].page = +el.dataset.p; render(); const w = $('#main .tbl-wrap'); if (w) w.scrollTop = 0; },
     row: (el, e) => { if (e.target.closest('input,select,button')) return; const h = ui.rowHandlers[el.dataset.t]; const r = (ui.tableRows[el.dataset.t] || [])[+el.dataset.i]; if (h && r) h(r); },
-    import: el => startImport(el.dataset.k, el.dataset.mode),
+    import: el => { const need = IMPORT_PERM[el.dataset.k]; if (need && !can(need)) return deny(need); startImport(el.dataset.k, el.dataset.mode); },
     importLegacy: () => importLegacy(),
     tpl: el => exportSpec(templateSpec(el.dataset.k, false), 'قالب-' + I.KINDS[el.dataset.k].title),
     tplItemsFull: () => exportSpec(templateSpec('items', true), 'الأصناف'),
@@ -1479,6 +1789,8 @@
     checkGo: el => {
       const k = el.dataset.k;
       if (k === 'units') { ui.dataTab = 'units'; go('data'); }
+      else if (k === 'units_transit') { ui.dataTab = 'transit'; go('data'); }
+      else if (k === 'po') { ui.poTab = 'orders'; go('po'); }
       else if (k === 'auto') reviewAuto();
       else if (k === 'noCost') { Object.assign(ui.f.items, { flag: 'بدون تكلفة', active: 'الكل', type: 'الكل', group: 'الكل', q: '' }); go('items'); }
       else if (k === 'unknownType') { Object.assign(ui.f.items, { flag: 'نوع غير معروف', active: 'الكل', type: 'الكل', group: 'الكل', q: '' }); go('items'); }
@@ -1524,7 +1836,9 @@
       const f = num(v); if (!(f > 0)) return toast('المعامل لازم يكون أكبر من صفر', 'bad');
       it.units.push({ name: unit, factor: f }); log(`تعريف وحدة ${unit}=${f} للصنف ${code}`); commit();
     },
-    addType: () => { db.types.push({ name: 'نوع جديد', leadTime: 1, extraMonths: 0, note: '' }); commit(); },
+    addType: () => { db.types.push({ name: 'نوع جديد', leadTime: 1, extraMonths: 0, note: '', currency: db.currencies[0].code }); commit(); },
+    addCur: () => { db.currencies.push({ code: 'EUR', name: 'يورو', rate: 4 }); commit(); },
+    delCur: el => { db.currencies.splice(+el.dataset.i, 1); commit(); },
     delType: async el => {
       const t = db.types[+el.dataset.i], n = db.items.filter(x => x.type === t.name).length;
       if (!await confirmBox(`حذف النوع «${esc(t.name)}»؟${n ? ` يوجد ${n} صنف بهذا النوع وسيظهر كـ «نوع غير معروف».` : ''}`, { ok: 'حذف', danger: true })) return;
@@ -1577,7 +1891,7 @@
     if (el.closest('#modalRoot')) return;
     const fn = ACT[el.dataset.act];
     const need = PERM[el.dataset.act];
-    if (need && !can(need)) return deny(need);
+    if (need && ui.user && !can(need)) return deny(need);
     if (fn) fn(el, e);
   });
 
@@ -1593,7 +1907,7 @@
       clearTimeout(searchTimer);
       searchTimer = setTimeout(() => {
         const [a, b] = el.dataset.search.split('.'); ui.f[a][b] = el.value;
-        const tid = { order: 'order', calc: 'calc', items: 'items', sales: 'salesMat', stock: 'stockT', transit: 'transitT' }[a];
+        const tid = { order: 'order', calc: 'calc', items: 'items', sales: 'salesMat', stock: 'stockT', transit: 'transitT', po: 'poList' }[a];
         if (ui.tables[tid]) ui.tables[tid].page = 0;
         render();
       }, 250);
@@ -1607,7 +1921,7 @@
     if (CHG_PERM[k] && !can(CHG_PERM[k])) { deny(CHG_PERM[k]); return render(); }
     if (k === 'filter') {
       const [a, b] = el.dataset.f.split('.'); ui.f[a][b] = el.value;
-      const tid = { order: 'order', calc: 'calc', items: 'items' }[a]; if (ui.tables[tid]) ui.tables[tid].page = 0;
+      const tid = { order: 'order', calc: 'calc', items: 'items', po: 'poList' }[a]; if (ui.tables[tid]) ui.tables[tid].page = 0;
       return render();
     }
     if (k === 'adj' || k === 'reason') {
@@ -1637,8 +1951,15 @@
         db.exceptions.forEach(x => { if (x.scope === 'type' && x.value === old) x.value = nn; });
         if (s.defaultType === old) s.defaultType = nn;
         t.name = nn;
-      } else if (key === 'note') t.note = el.value;
+      }
+      else if (key === 'note') t.note = el.value;
+      else if (key === 'currency') t.currency = el.value;
       else t[key] = num(el.value);
+      return commit();
+    }
+    if (k === 'cur') {
+      const c = db.currencies[+el.dataset.i], key = el.dataset.k;
+      if (key === 'rate') c.rate = num(el.value); else if (key === 'code') { const old = c.code; c.code = el.value.trim().toUpperCase() || old; db.types.forEach(t => { if (t.currency === old) t.currency = c.code; }); Object.values(db.po.orders).forEach(o => { if (o.currency === old) o.currency = c.code; }); } else c.name = el.value.trim();
       return commit();
     }
     if (k === 'cls') { const v = num(el.value) / 100; db.classes[+el.dataset.i].service = Math.max(0, Math.min(0.9999, v)); return commit(); }

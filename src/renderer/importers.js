@@ -7,7 +7,7 @@
   const E = (typeof module !== 'undefined' && module.exports) ? require('./engine.js') : root.Engine;
   const { normCode, num, toMonth, normUnit } = E;
 
-  const norm = s => String(s == null ? '' : s).replace(/[\s_\-:؟?()«»"'.]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').toLowerCase();
+  const norm = s => String(s == null ? '' : s).normalize('NFKC').replace(/[\s_\-:؟?()«»"'.]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').toLowerCase();
 
   // تعريف الحقول لكل نوع استيراد: key, label, aliases, required
   const KINDS = {
@@ -58,6 +58,39 @@
         { key: 'cost', label: 'تكلفة الوحدة', aliases: ['تكلفة الوحدة', 'التكلفة', 'سعر التكلفة', 'cost'] }
       ]
     },
+    po: {
+      title: 'أوامر الشراء',
+      fields: [
+        { key: 'poNo', label: 'رقم الأمر', aliases: ['رقم الأمر', 'رقم الامر', 'رقم امر الشراء', 'امر الشراء', 'po', 'pono'], required: true },
+        { key: 'code', label: 'رقم الصنف', aliases: ['رقم الصنف', 'كود الصنف', 'الكود', 'code'], required: true },
+        { key: 'name', label: 'اسم الصنف', aliases: ['اسم الصنف', 'الاسم', 'name'] },
+        { key: 'unit', label: 'الوحدة', aliases: ['الوحدة', 'وحدة', 'unit'] },
+        { key: 'qty', label: 'كمية أمر الشراء', aliases: ['كمية امر الشراء', 'كمية الأمر', 'الكمية المطلوبة', 'الكمية', 'qty'], required: true },
+        { key: 'value', label: 'قيمة السطر (سعر أمر الشراء)', aliases: ['سعر امر الشراء', 'قيمة امر الشراء', 'قيمة السطر', 'القيمة', 'الاجمالي', 'value', 'amount'] },
+        { key: 'invQty', label: 'الكمية المستلمة (كمية الفاتورة)', aliases: ['كمية الفاتورة', 'الكمية المستلمة', 'المستلم', 'received'] },
+        { key: 'remaining', label: 'الكمية المتبقية', aliases: ['الكمية المتبقية', 'المتبقي', 'remaining'] },
+        { key: 'supplier', label: 'المورد', aliases: ['المورد', 'اسم المورد', 'supplier', 'vendor'] },
+        { key: 'currency', label: 'العملة', aliases: ['العملة', 'currency'] },
+        { key: 'poDate', label: 'تاريخ الأمر', aliases: ['تاريخ الأمر', 'تاريخ الامر', 'التاريخ', 'date'] },
+        { key: 'eta', label: 'تاريخ الوصول المتوقع', aliases: ['تاريخ الوصول المتوقع', 'تاريخ الوصول', 'الوصول المتوقع', 'eta'] }
+      ]
+    },
+    poPay: {
+      title: 'سداد أوامر الشراء',
+      fields: [
+        { key: 'poNo', label: 'رقم الأمر', aliases: ['رقم الأمر', 'رقم الامر', 'رقم امر الشراء', 'امر الشراء', 'po'], required: true },
+        { key: 'value', label: 'قيمة الأمر', aliases: ['القيمة دولار', 'قيمة الأمر', 'قيمة الامر', 'القيمة', 'value'] },
+        { key: 'shipping', label: 'رسوم الشحن', aliases: ['رسوم الشحن دولار', 'رسوم الشحن', 'الشحن', 'shipping'] },
+        { key: 'currency', label: 'العملة', aliases: ['العملة', 'currency'] },
+        { key: 'status', label: 'حالة السداد', aliases: ['حالة السداد', 'السداد', 'status'] },
+        { key: 'paid', label: 'المبلغ المدفوع', aliases: ['المبلغ المدفوع', 'المدفوع', 'المسدد', 'paid'] },
+        { key: 'payDate', label: 'تاريخ السداد', aliases: ['تاريخ السداد', 'تاريخ الدفع'] },
+        { key: 'agent', label: 'المخلّص', aliases: ['المخلص', 'المخلّص', 'agent'] },
+        { key: 'supplier', label: 'المورد', aliases: ['المورد', 'supplier'] },
+        { key: 'eta', label: 'تاريخ الوصول المتوقع', aliases: ['تاريخ الوصول المتوقع', 'تاريخ الوصول', 'eta'] },
+        { key: 'note', label: 'ملاحظة', aliases: ['ملاحظة', 'ملاحظات', 'note'] }
+      ]
+    },
     transit: {
       title: 'البضاعة بالطريق',
       fields: [
@@ -91,7 +124,8 @@
     return best;
   }
 
-  function rowsToRecords(rows, headerRow, map) {
+  function rowsToRecords(rows, headerRow, map, keyField) {
+    const key = keyField || 'code';
     const out = [];
     for (let r = headerRow + 1; r < rows.length; r++) {
       const row = rows[r] || [];
@@ -104,10 +138,11 @@
         if (v != null && v !== '') any = true;
       }
       if (!any) continue;
-      if (rec.code == null || String(rec.code).trim() === '') continue;
+      if (rec[key] == null || String(rec[key]).trim() === '') continue;
       // تجاهل صفوف الإجمالي
-      if (/^(الإجمالي|الاجمالي|المجموع|total)$/i.test(String(rec.code).trim())) continue;
-      rec.code = normCode(rec.code);
+      if (/^(الإجمالي|الاجمالي|المجموع|total)$/i.test(String(rec[key]).trim())) continue;
+      if (rec.code != null) rec.code = normCode(rec.code);
+      if (rec.poNo != null) rec.poNo = normCode(rec.poNo);
       out.push(rec);
     }
     return out;
@@ -223,6 +258,137 @@
     return { rows: rows.length, added };
   }
 
+  // ---------- أوامر الشراء ----------
+  const isNum = v => v !== null && v !== '' && v !== undefined && isFinite(typeof v === 'number' ? v : parseFloat(String(v).replace(/,/g, '')));
+  const toDate = v => {
+    if (v == null || v === '') return '';
+    if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0, 10);
+    if (typeof v === 'number' && v > 20000 && v < 80000) return new Date(Math.round((v - 25569) * 86400000)).toISOString().slice(0, 10);
+    const s = String(v).trim().replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+    let m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/); if (m) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
+    m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/); if (m) return m[3] + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0');
+    return '';
+  };
+  function curCode(db, v) {
+    const s = String(v || '').trim(); if (!s) return '';
+    const c = (db.currencies || []).find(x => x.code.toLowerCase() === s.toLowerCase() || norm(x.name) === norm(s) || (s.includes('دولار') && x.code === 'USD') || (s.includes('ريال') && x.code === 'SAR'));
+    return c ? c.code : s.toUpperCase();
+  }
+  function defaultCurrency(db, lines) {
+    const items = new Map(db.items.map(i => [i.code, i]));
+    for (const l of lines || []) {
+      const it = items.get(l.code); if (!it) continue;
+      const t = (db.types || []).find(x => x.name === it.type);
+      if (t && t.currency) return t.currency;
+    }
+    return '';
+  }
+  function ensurePo(db) { if (!db.po) db.po = { orders: {}, imports: [] }; if (!db.po.orders) db.po.orders = {}; if (!db.po.imports) db.po.imports = []; return db.po; }
+
+  // استيراد تقرير أوامر الشراء (سطر لكل صنف). التقرير = كل الأوامر المفتوحة الآن:
+  // أمر موجود ← يتحدث ، أمر جديد ← يُضاف ، أمر مفتوح اختفى من التقرير ← «وصل المخزون» تلقائيًا.
+  function applyPOs(db, recs, { date, user, file } = {}) {
+    const po = ensurePo(db);
+    const day = date || new Date().toISOString().slice(0, 10);
+    const groups = new Map();
+    let skipped = 0;
+    for (const r of recs) {
+      if (!r.poNo || !/\d/.test(r.poNo) || /[^\w\-./]/.test(r.poNo) || !r.code || /[٠-٩:]/.test(r.code) || !(isNum(r.qty) || isNum(r.remaining))) { skipped++; continue; }
+      if (!groups.has(r.poNo)) groups.set(r.poNo, []);
+      const qty = num(r.qty), inv = num(r.invQty);
+      groups.get(r.poNo).push({
+        code: r.code, name: String(r.name || '').trim(), unit: String(r.unit || '').trim(), qty, value: Math.abs(num(r.value)), invQty: inv,
+        remaining: isNum(r.remaining) ? num(r.remaining) : Math.max(0, qty - inv), _r: r
+      });
+    }
+    const added = autoAddItems(db, [...groups.values()].flat().map(l => ({ code: l.code, name: l.name, unit: l.unit })), 'أوامر الشراء');
+    const res = { orders: groups.size, lines: 0, newOrders: [], closed: [], reopened: [], completed: [], skipped, added };
+    for (const [no, lines] of groups) {
+      res.lines += lines.length;
+      let o = po.orders[no];
+      const first = lines[0]._r;
+      if (!o) {
+        o = po.orders[no] = { no, status: 'open', firstSeen: day, lastSeen: day, currency: '', lines: [], payments: [], shipping: 0, agent: '', supplier: '', note: '', eta: '', etaManual: false, flags: [] };
+        res.newOrders.push(no);
+      }
+      o.lines = lines.map(l => { const x = Object.assign({}, l); delete x._r; return x; });
+      o.lastSeen = day;
+      if (first.supplier) o.supplier = String(first.supplier).trim();
+      if (first.currency) o.currency = curCode(db, first.currency);
+      if (!o.currency) o.currency = defaultCurrency(db, o.lines) || 'SAR';
+      const pd = toDate(first.poDate); if (pd) o.poDate = pd;
+      const eta = toDate(first.eta); if (eta) { o.eta = eta; o.etaManual = true; }
+      o.flags = (o.flags || []).filter(f => f !== 'stillInReport');
+      const allDone = o.lines.every(l => num(l.remaining) <= 0);
+      if (allDone && o.status === 'open') { o.status = 'received'; o.receivedAt = day; o.receivedBy = 'auto'; o.receivedNote = 'الكمية المتبقية صفر'; res.completed.push(no); }
+      else if (!allDone && o.status === 'received') {
+        if (o.receivedBy === 'auto') { o.status = 'open'; o.receivedAt = ''; o.receivedBy = ''; res.reopened.push(no); }
+        else o.flags.push('stillInReport'); // علّمه المستخدم واصل لكنه ما زال في تقرير النظام
+      }
+    }
+    for (const no of Object.keys(po.orders)) {
+      const o = po.orders[no];
+      if (o.status === 'open' && !groups.has(no) && (o.lines || []).length) {
+        o.status = 'received'; o.receivedAt = day; o.receivedBy = 'auto'; o.receivedNote = 'اختفى من تقرير ' + day; res.closed.push(no);
+      }
+    }
+    po.imports.push({ at: new Date().toISOString(), date: day, kind: 'po', file: file || '', user: user || '', orders: res.orders, lines: res.lines, newOrders: res.newOrders.length, closed: res.closed.length, reopened: res.reopened.length });
+    if (po.imports.length > 200) po.imports.splice(0, po.imports.length - 200);
+    return res;
+  }
+
+  // استيراد شيت محاسب الموردين (سطر لكل أمر): الشحن، المخلّص، الحالة، المدفوع، الملاحظة.
+  // دفعات «من الشيت» تُستبدل في كل استيراد، والدفعات اليدوية تبقى كما هي.
+  function applyPOPay(db, recs, { date, user, file, currencyHint } = {}) {
+    const po = ensurePo(db);
+    const day = date || new Date().toISOString().slice(0, 10);
+    const res = { orders: 0, created: [], paidFull: 0, partial: 0, fromNote: [], skipped: 0 };
+    const has = (r, k) => r[k] != null && String(r[k]).trim() !== '';
+    for (const r of recs) {
+      if (!r.poNo || !/\d/.test(r.poNo)) { res.skipped++; continue; }
+      res.orders++;
+      let o = po.orders[r.poNo];
+      if (!o) {
+        o = po.orders[r.poNo] = { no: r.poNo, status: 'open', firstSeen: day, lastSeen: day, currency: '', lines: [], payments: [], shipping: 0, agent: '', supplier: '', note: '', eta: '', etaManual: false, flags: [] };
+        res.created.push(r.poNo);
+      }
+      // الشيت هو مرجع المبالغ: عمود العملة، أو عملة من عنوان عمود القيمة (مثل «القيمة دولار»)
+      if (has(r, 'currency')) o.currency = curCode(db, r.currency);
+      else if (currencyHint) o.currency = currencyHint;
+      if (!o.currency) o.currency = defaultCurrency(db, o.lines) || 'SAR';
+      if (has(r, 'value') && !(o.lines || []).length) o.manualValue = Math.abs(num(r.value));
+      if (has(r, 'shipping')) o.shipping = Math.abs(num(r.shipping));
+      if (has(r, 'agent')) o.agent = String(r.agent).trim();
+      if (has(r, 'supplier')) o.supplier = String(r.supplier).trim();
+      if (has(r, 'note')) o.note = String(r.note).trim();
+      const eta = toDate(r.eta); if (eta) { o.eta = eta; o.etaManual = true; }
+      o.payments = (o.payments || []).filter(p => p.source !== 'sheet');
+      const st = String(r.status || '').trim();
+      const notPaid = /لم|غير|not|unpaid/i.test(st);
+      const paid = !notPaid && /سدد|السداد|مدفوع|paid/i.test(st);
+      const linesValue = (o.lines || []).reduce((a, l) => a + num(l.value), 0);
+      const total = ((o.lines || []).length ? linesValue : num(o.manualValue)) + num(o.shipping);
+      const payDate = toDate(r.payDate) || day;
+      if (has(r, 'paid') && num(r.paid) > 0) {
+        o.payments.push({ id: 'S' + Date.now() + Math.random().toString(36).slice(2, 6), date: payDate, amount: num(r.paid), currency: o.currency, kind: 'دفعة', note: 'من شيت السداد', source: 'sheet', by: user || '' });
+        res.partial++;
+      } else if (paid && total > 0) {
+        o.payments.push({ id: 'S' + Date.now() + Math.random().toString(36).slice(2, 6), date: payDate, amount: total, currency: o.currency, kind: 'سداد كامل', note: 'حالة «' + st + '» في شيت السداد', source: 'sheet', by: user || '' });
+        res.paidFull++;
+      } else if (has(r, 'note')) {
+        // ملاحظة فيها مبلغ مثل «تم سداد دفعة 5000» ← دفعة جزئية للمراجعة
+        const nums = (String(r.note).replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).match(/\d[\d,.]*/g) || []).map(x => num(x)).filter(x => x >= 100);
+        if (nums.length) {
+          const amt = Math.max(...nums);
+          o.payments.push({ id: 'S' + Date.now() + Math.random().toString(36).slice(2, 6), date: payDate, amount: amt, currency: o.currency, kind: 'دفعة', note: 'من الملاحظة: ' + r.note + ' — راجع العملة', source: 'sheet', review: true, by: user || '' });
+          res.fromNote.push(r.poNo);
+        }
+      }
+    }
+    po.imports.push({ at: new Date().toISOString(), date: day, kind: 'poPay', file: file || '', user: user || '', orders: res.orders, newOrders: res.created.length });
+    return res;
+  }
+
   // ---------- استيراد ملف الإكسيل القديم (نفس هيكل ملف تقرير المشتريات) ----------
   function isLegacyWorkbook(sheets) {
     const names = sheets.map(s => s.name);
@@ -243,7 +409,7 @@
     const types = [];
     for (let r = 6; r <= 10; r++) {
       const name = cell(r, 6);
-      if (name) types.push({ name: String(name).trim(), leadTime: num(cell(r, 7)), extraMonths: num(cell(r, 8)), note: cell(r, 9) ? String(cell(r, 9)) : '' });
+      if (name) types.push({ name: String(name).trim(), leadTime: num(cell(r, 7)), extraMonths: num(cell(r, 8)), note: cell(r, 9) ? String(cell(r, 9)) : '', currency: /خارج|استيراد/.test(String(name) + (cell(r, 9) || '')) ? 'USD' : 'SAR' });
     }
     if (types.length) db.types = types;
     const classes = [];
@@ -316,7 +482,15 @@
     return db;
   }
 
-  const Importers = { KINDS, detectHeader, rowsToRecords, applyItems, applySales, applyStock, applyTransit, autoAddItems, importLegacy, isLegacyWorkbook, syncGroups, parseActive };
+  // عملة من نص عنوان العمود: «القيمة دولار» ← USD
+  function currencyFromHeader(text) {
+    const t = String(text || '');
+    if (/دولار|usd|\$/i.test(t)) return 'USD';
+    if (/ريال|sar/i.test(t)) return 'SAR';
+    if (/يورو|eur/i.test(t)) return 'EUR';
+    return '';
+  }
+  const Importers = { currencyFromHeader, KINDS, applyPOs, applyPOPay, toDate, curCode, detectHeader, rowsToRecords, applyItems, applySales, applyStock, applyTransit, autoAddItems, importLegacy, isLegacyWorkbook, syncGroups, parseActive };
   if (typeof module !== 'undefined' && module.exports) module.exports = Importers;
   else root.Importers = Importers;
 })(typeof window !== 'undefined' ? window : globalThis);

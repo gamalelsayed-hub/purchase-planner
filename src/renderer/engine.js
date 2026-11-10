@@ -127,6 +127,7 @@
       thrB: 0.95,
       extraBasis: 'avg_std', // avg_std = (المتوسط + الانحراف) ، avg = المتوسط فقط
       classifyScope: 'all', // all = كل الأصناف ، active = النشطة فقط
+      cashHorizonDays: 60, // أفق الكاش المطلوب (يوم)
       defaultType: 'مصنع',
       defaultLead: 1,
       keepMonths: 24,
@@ -146,10 +147,12 @@
       version: 1,
       settings: defaultSettings(),
       types: [
-        { name: 'خارجي', leadTime: 3, extraMonths: 3, note: 'استيراد' },
-        { name: 'محلي', leadTime: 1, extraMonths: 0, note: '' },
-        { name: 'مصنع', leadTime: 1, extraMonths: 0, note: '' }
+        { name: 'خارجي', leadTime: 3, extraMonths: 3, note: 'استيراد', currency: 'USD' },
+        { name: 'محلي', leadTime: 1, extraMonths: 0, note: '', currency: 'SAR' },
+        { name: 'مصنع', leadTime: 1, extraMonths: 0, note: '', currency: 'SAR' }
       ],
+      currencies: [{ code: 'SAR', name: 'ريال', rate: 1 }, { code: 'USD', name: 'دولار', rate: 3.75 }],
+      po: { orders: {}, imports: [] },
       classes: defaultClasses(),
       groups: ['غير مصنف'],
       exceptions: [],
@@ -254,14 +257,22 @@
       const c = num(r.cost);
       if (c > 0) { stockCostSum[i] += c / f; stockCostCnt[i]++; }
     }
-    // بالطريق
+    // بالطريق: الإدخال اليدوي + الكمية المتبقية في أوامر الشراء المفتوحة
+    const transitPo = new Array(n).fill(0), transitManual = new Array(n).fill(0);
+    for (const r of openPoLines(db)) {
+      const i = itemIdx.get(r.code);
+      if (i === undefined) { issues.push({ kind: 'missingItem', sheet: 'أوامر الشراء', code: r.code, name: r.name, unit: r.unit, severity: 'x' }); continue; }
+      const f = unitFactor(items[i], r.unit);
+      if (f == null) { rowFlags[i].transitUnit = true; issues.push({ kind: 'unit', sheet: 'أوامر الشراء', code: r.code, name: items[i].name, unit: r.unit, severity: 'x' }); continue; }
+      transitQty[i] += num(r.qty) * f; transitPo[i] += num(r.qty) * f;
+    }
     for (const r of db.transit || []) {
       const i = itemIdx.get(r.code);
       if (i === undefined) { issues.push({ kind: 'missingItem', sheet: 'بالطريق', code: r.code, name: r.name, unit: r.unit, severity: 'x' }); continue; }
       transitRowsCnt[i]++;
       const f = unitFactor(items[i], r.unit);
       if (f == null) { rowFlags[i].transitUnit = true; issues.push({ kind: 'unit', sheet: 'بالطريق', code: r.code, name: items[i].name, unit: r.unit, severity: 'x' }); continue; }
-      transitQty[i] += num(r.qty) * f;
+      transitQty[i] += num(r.qty) * f; transitManual[i] += num(r.qty) * f;
     }
 
     // الإحصاءات
@@ -291,7 +302,9 @@
     for (let i = 0; i < n; i++) {
       const it = items[i];
       const t = typeMap.get(it.type);
-      const cls = clsQ[i] + clsV[i];
+      const clsAuto = clsQ[i] + clsV[i];
+      const clsManual = !!(it.clsOverride && classMap.has(it.clsOverride));
+      const cls = clsManual ? it.clsOverride : clsAuto;
       const clsDef = classMap.get(cls);
       const service = clsDef ? num(clsDef.service) : 0;
       const z = service > 0 && service < 1 ? normsinv(service) : 0;
@@ -324,16 +337,17 @@
       if (rowFlags[i].transitUnit) notes.push('وحدة بالطريق غير معرّفة');
       if (delta !== 0 && !String(a.reason || '').trim()) notes.push('تعديل بدون سبب');
       if (it.autoAdded) notes.push('غير مصنف — مضاف تلقائيًا');
+      if (clsManual) notes.push('تصنيف يدوي (التلقائي ' + clsAuto + ')');
       if (excNames.length) notes.push('فترة استثنائية: ' + excNames.join('، '));
       rows[i] = {
         i, code: it.code, name: it.name, baseUnit: it.baseUnit, purchaseUnit: it.purchaseUnit || it.baseUnit, pf,
         group: it.group || '', sub1: it.sub1 || '', sub2: it.sub2 || '', mainItem: it.mainItem || '', type: it.type || '', active,
         autoAdded: !!it.autoAdded,
         sales: sales[i], total: total6[i], avg: avg[i], std: std[i], cost: cost[i], value6: value6[i],
-        clsQ: clsQ[i], clsV: clsV[i], cls, service, z,
+        clsQ: clsQ[i], clsV: clsV[i], cls, clsAuto, clsManual, service, z,
         review, lead, fixedExtra, excMonths, extraMonths, cover,
         expected, safety, extra, maxLevel,
-        stock: stockQty[i], transit: transitQty[i], available,
+        stock: stockQty[i], transit: transitQty[i], transitPo: transitPo[i], transitManual: transitManual[i], available,
         stockRows: stockRowsCnt[i], transitRows: transitRowsCnt[i],
         suggested, delta, reason: a.reason || '', final, finalBase,
         orderValue: finalBase * cost[i], stockValue: stockQty[i] * cost[i], transitValue: transitQty[i] * cost[i], maxValue: maxLevel * cost[i],
@@ -364,6 +378,8 @@
       { id: 'negStock', title: 'أصناف بمخزون سالب', count: count(r => r.stock < 0), sev: 'w', where: 'المخزون', why: 'خطأ في النظام — يضخم الطلب' },
       { id: 'stockDup', title: 'أصناف مكررة في تقرير المخزون', count: [...stockDup.values()].filter(v => v > 1).length, sev: 'w', where: 'المخزون', why: 'تُجمع كمياتها — تأكد أنها ليست لصقًا مكررًا' },
       { id: 'transitDup', title: 'أصناف بالطريق من أكثر من سطر/مصدر', count: [...transitDup.values()].filter(v => v > 1).length, sev: 'w', where: 'بالطريق', why: 'تتجمع — تأكد أنها أوامر مختلفة' },
+      { id: 'transitBoth', title: 'أصناف بالطريق من أمر شراء ومن إدخال يدوي معًا', count: count(r => r.transitPo > 0 && r.transitManual > 0), sev: 'w', where: 'المبيعات والمخزون ← بالطريق', why: 'تأكد أن السطر اليدوي ليس نفس أمر الشراء (يُخصم مرتين)' },
+      { id: 'poOverdue', title: 'أوامر شراء مفتوحة تجاوزت تاريخ الوصول المتوقع', count: poSummary(db).filter(o => o.status === 'open' && o.daysToEta != null && o.daysToEta < 0).length, sev: 'w', where: 'أوامر الشراء', why: 'حدّث التاريخ المتوقع أو علّمه «وصل المخزون»' },
       { id: 'negSales', title: 'أسطر مبيعات صافيها سالب (مرتجع أكبر من المنصرف)', count: negSalesRows, sev: 'w', where: 'المبيعات', why: 'تقلل المتوسط — تأكد أنها صحيحة' },
       { id: 'adjNoReason', title: 'تعديلات يدوية بدون سبب', count: count(r => r.delta !== 0 && !String(r.reason).trim()), sev: 'x', where: 'قائمة الطلب ← تعديل', why: 'كل تعديل على السياسة لازم يكون له سبب' },
       { id: 'inactiveAdj', title: 'أصناف موقوفة عليها تعديل يدوي', count: count(r => r.status === 'موقوف + تعديل'), sev: 'w', where: 'قائمة الطلب', why: 'صنف موقوف ومطلوب يدويًا — تأكد من القرار' },
@@ -396,8 +412,75 @@
     };
   }
 
+  // ---------- أوامر الشراء ----------
+  function openPoLines(db) {
+    const out = [];
+    const orders = (db.po && db.po.orders) || {};
+    for (const no of Object.keys(orders)) {
+      const o = orders[no];
+      if (o.status !== 'open') continue;
+      for (const l of o.lines || []) if (num(l.remaining) > 0) out.push({ code: l.code, name: l.name, unit: l.unit, qty: num(l.remaining), source: 'أمر ' + no });
+    }
+    return out;
+  }
+  function addMonthsDate(iso, months) {
+    if (!iso) return '';
+    const d = new Date(iso + 'T00:00:00Z');
+    if (isNaN(d)) return '';
+    const whole = Math.floor(months), frac = months - whole;
+    d.setUTCMonth(d.getUTCMonth() + whole);
+    if (frac) d.setUTCDate(d.getUTCDate() + Math.round(frac * 30));
+    return d.toISOString().slice(0, 10);
+  }
+  function fxRate(db, cur) {
+    const c = (db.currencies || []).find(x => x.code === cur);
+    return c ? num(c.rate) || 1 : 1;
+  }
+  // مدة التوصيل للأمر = أطول فترة توصيل لأصنافه (خاصة بالصنف أو حسب نوعه)
+  function poLead(db, o) {
+    const items = new Map((db.items || []).map(it => [it.code, it]));
+    const types = new Map((db.types || []).map(t => [t.name, t]));
+    let lead = 0;
+    for (const l of o.lines || []) {
+      const it = items.get(l.code); if (!it) continue;
+      const t = types.get(it.type);
+      lead = Math.max(lead, num(it.leadOverride) > 0 ? num(it.leadOverride) : (t ? num(t.leadTime) : 0));
+    }
+    if (!lead) {
+      // أمر بدون أصناف (من شيت السداد فقط): أطول فترة توصيل للأنواع بنفس عملة الأمر
+      for (const t of db.types || []) if (!o.currency || (t.currency || 'SAR') === o.currency) lead = Math.max(lead, num(t.leadTime));
+    }
+    return lead || num((db.settings || {}).defaultLead) || 1;
+  }
+  function poAutoEta(db, o) { return addMonthsDate(o.firstSeen, poLead(db, o)); }
+  function poSummary(db, todayIso) {
+    const today = todayIso || new Date().toISOString().slice(0, 10);
+    const orders = (db.po && db.po.orders) || {};
+    return Object.keys(orders).map(no => {
+      const o = orders[no];
+      const linesValue = (o.lines || []).reduce((a, l) => a + num(l.value), 0);
+      const value = (o.lines && o.lines.length) ? linesValue : num(o.manualValue);
+      const remainingValue = (o.lines || []).reduce((a, l) => a + (num(l.qty) > 0 ? num(l.value) * Math.max(0, num(l.remaining)) / num(l.qty) : 0), 0);
+      const rate = num(o.rate) > 0 ? num(o.rate) : fxRate(db, o.currency);
+      const shipping = num(o.shipping);
+      const total = value + shipping;
+      const totalSar = total * rate;
+      const paidSar = (o.payments || []).reduce((a, p) => a + num(p.amount) * (num(p.rate) > 0 ? num(p.rate) : fxRate(db, p.currency || o.currency)), 0);
+      const dueSar = Math.max(0, totalSar - paidSar);
+      const eta = o.etaManual && o.eta ? o.eta : poAutoEta(db, o);
+      const daysToEta = eta ? Math.round((new Date(eta + 'T00:00:00Z') - new Date(today + 'T00:00:00Z')) / 86400000) : null;
+      const payStatus = totalSar <= 0 ? 'غير محدد' : paidSar <= 0.005 ? 'غير مسدد' : paidSar + 0.5 >= totalSar ? 'مسدد' : 'مسدد جزئيًا';
+      return {
+        no, status: o.status, currency: o.currency || 'SAR', rate, value, shipping, total, totalSar, paidSar, dueSar, payStatus,
+        remainingValue, lines: (o.lines || []).length, eta, etaManual: !!o.etaManual, daysToEta, agent: o.agent || '', supplier: o.supplier || '',
+        firstSeen: o.firstSeen || '', lastSeen: o.lastSeen || '', receivedAt: o.receivedAt || '', receivedBy: o.receivedBy || '', note: o.note || '', poDate: o.poDate || '',
+        payments: (o.payments || []).length, flags: o.flags || []
+      };
+    });
+  }
+
   const Engine = {
-    compute, normsinv, normUnit, normCode, num, toMonth, monthAdd, monthLabel,
+    compute, openPoLines, poSummary, poAutoEta, poLead, addMonthsDate, fxRate, normsinv, normUnit, normCode, num, toMonth, monthAdd, monthLabel,
     unitFactor, purchaseFactor, allUnits, emptyDb, defaultSettings, defaultClasses, abc, roundUp, exceptionApplies
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Engine;

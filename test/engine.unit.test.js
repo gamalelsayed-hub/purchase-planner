@@ -88,4 +88,40 @@ assert.strictEqual(out.added.length, 1);
 const added = db.items.find(i => i.code === 'NEW');
 assert.ok(added.autoAdded && added.group === 'غير مصنف');
 
+// التصنيف اليدوي يغلب التلقائي
+db = baseDb(); db.items[1].clsOverride = 'AA';
+const rb = E.compute(db).rows[1];
+assert.strictEqual(rb.cls, 'AA'); assert.strictEqual(rb.clsAuto, 'BB'); assert.ok(rb.clsManual);
+close(rb.service, 0.95, 'manual class service level');
+
+// أوامر الشراء: استيراد، بالطريق تلقائي، الإغلاق عند الاختفاء، إعادة الفتح، السداد
+db = baseDb(); db.transit = [];
+const poRows = (list) => list.map(([poNo, code, unit, qty, value, inv]) => ({ poNo, code, unit, qty, value, invQty: inv }));
+let pr = I.applyPOs(db, poRows([['P1', 'A1', 'كرتون', 10, 1000, 0], ['P1', 'B1', 'حبه', 40, 200, 10], ['P2', 'B1', 'حبه', 5, 50, 0]]), { date: '2026-07-01' });
+assert.strictEqual(pr.orders, 2); assert.strictEqual(pr.newOrders.length, 2);
+assert.strictEqual(db.po.orders.P1.currency, 'USD', 'currency from item type (خارجي)');
+let rr = E.compute(db).rows;
+close(rr[0].transit, 100, 'A1 transit from PO = 10 cartons'); close(rr[1].transit, 35, 'B1 transit = (40-10) + 5');
+// P1 تلقائيًا: الوصول = أول ظهور + أطول توصيل (خارجي 3 أشهر)
+assert.strictEqual(E.poSummary(db, '2026-07-01').find(o => o.no === 'P1').eta, '2026-10-01');
+// إعادة الرفع بدون P2 ← P2 وصل المخزون
+pr = I.applyPOs(db, poRows([['P1', 'A1', 'كرتون', 10, 1000, 0], ['P1', 'B1', 'حبه', 40, 200, 10]]), { date: '2026-07-15' });
+assert.deepStrictEqual(pr.closed, ['P2']); assert.strictEqual(db.po.orders.P2.status, 'received');
+close(E.compute(db).rows[1].transit, 30, 'received PO no longer in transit');
+// رجع P2 للتقرير ← يعاد فتحه (لأنه أُغلق تلقائيًا)
+pr = I.applyPOs(db, poRows([['P1', 'A1', 'كرتون', 10, 1000, 0], ['P2', 'B1', 'حبه', 5, 50, 0]]), { date: '2026-07-20' });
+assert.deepStrictEqual(pr.reopened, ['P2']);
+// شيت السداد: P1 مسدد بالكامل، P3 جديد بدفعة من الملاحظة
+const pay = I.applyPOPay(db, [{ poNo: 'P1', shipping: 100, status: 'تم السداد' }, { poNo: 'P3', value: 2000, status: 'لم يتم السداد', note: 'تم سداد دفعة 500' }], { date: '2026-07-20', currencyHint: 'USD' });
+assert.strictEqual(pay.paidFull, 1); assert.deepStrictEqual(pay.fromNote, ['P3']);
+const sm = E.poSummary(db, '2026-07-20');
+const p1 = sm.find(o => o.no === 'P1'), p3 = sm.find(o => o.no === 'P3');
+close(p1.totalSar, 1100 * 3.75, 'P1 total SAR'); assert.strictEqual(p1.payStatus, 'مسدد'); close(p1.dueSar, 0, 'P1 due');
+close(p3.dueSar, (2000 - 500) * 3.75, 'P3 due'); assert.strictEqual(p3.payStatus, 'مسدد جزئيًا');
+// إعادة استيراد الشيت لا تكرر الدفعات
+I.applyPOPay(db, [{ poNo: 'P1', status: 'تم السداد' }], { date: '2026-07-21', currencyHint: 'USD' });
+assert.strictEqual(db.po.orders.P1.payments.length, 1);
+// عملة من عنوان العمود
+assert.strictEqual(I.currencyFromHeader('القيمة دولار'), 'USD');
+
 console.log('✓ all engine unit tests passed');
