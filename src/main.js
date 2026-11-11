@@ -291,6 +291,23 @@ ipcMain.handle('file:openExcel', async (_e, opts = {}) => {
   if (/\.pdf$/i.test(file) && !wb.sheets[0].rows.length) throw new Error('ما قدرت أقرأ جدول من ملف PDF — تأكد أنه تقرير نصّي وليس صورة ممسوحة');
   return { file, name: path.basename(file), sheets: wb.sheets };
 });
+// اختيار أكثر من ملف مرة وحدة (التحديث الشامل) — كل ملف يُقرأ لحاله، والخطأ في ملف ما يوقف الباقي
+ipcMain.handle('file:openMany', async (_e, opts = {}) => {
+  const r = await dialog.showOpenDialog(win, {
+    title: opts.title || 'اختر الملفات',
+    properties: ['openFile', 'multiSelections'],
+    filters: [{ name: 'Excel / PDF', extensions: ['xlsx', 'xls', 'xlsm', 'csv', 'pdf'] }]
+  });
+  if (r.canceled || !r.filePaths.length) return null;
+  const out = [];
+  for (const file of r.filePaths) {
+    try {
+      const wb = /\.pdf$/i.test(file) ? await readPdfTable(fs.readFileSync(file)) : await readWorkbook(file, opts);
+      out.push({ file, name: path.basename(file), sheets: wb.sheets });
+    } catch (e) { out.push({ file, name: path.basename(file), sheets: [], error: e.message }); }
+  }
+  return out;
+});
 ipcMain.handle('file:saveExcel', async (_e, spec, defaultName) => {
   const r = await dialog.showSaveDialog(win, {
     title: 'حفظ ملف Excel',

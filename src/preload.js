@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('api', {
   onUpdateProgress: (cb) => ipcRenderer.on('update:progress', (_e, p) => cb(p)),
   openUrl: (url) => ipcRenderer.invoke('app:openUrl', url),
   openExcel: (opts) => ipcRenderer.invoke('file:openExcel', opts),
+  openMany: (opts) => ipcRenderer.invoke('file:openMany', opts),
   saveExcel: (spec, name) => ipcRenderer.invoke('file:saveExcel', spec, name),
   savePdf: (name, landscape) => ipcRenderer.invoke('file:savePdf', name, landscape),
   print: () => ipcRenderer.invoke('file:print'),

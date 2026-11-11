@@ -1206,7 +1206,7 @@
     ], (db.po.imports || []).slice().reverse(), { empty: 'لا يوجد استيراد بعد' });
     else body = poOrdersTab();
     return `<div class="page-head"><div><h1>أوامر الشراء والكاش المطلوب</h1><div class="sub">متابعة الأوامر بالطريق وحالة السداد — ${db.settings.poAsTransit ? 'الكمية المتبقية في الأوامر المفتوحة <b>تنخصم من الطلب</b> كبضاعة بالطريق' : 'الأوامر للمتابعة والكاش فقط و<b>لا تنخصم من الطلب</b> (الإعداد مقفل)'}</div></div>
-      <div class="actions"><button class="primary" data-act="import" data-k="po">استيراد أوامر الشراء (Excel / PDF)</button><button data-act="import" data-k="poPay">استيراد شيت الشحن والسداد</button><button data-act="poNew">إضافة أمر يدوي</button><button data-act="tpl" data-k="po">قالب أوامر الشراء</button><button data-act="tpl" data-k="poPay">قالب الشحن والسداد</button></div></div>
+      <div class="actions"><button class="ok" data-act="poBulkImport" title="تقرير أوامر الشراء + شيت الشحن والسداد + تقرير المخلّص مرة وحدة">⟳ تحديث شامل</button><button class="primary" data-act="import" data-k="po">استيراد أوامر الشراء (Excel / PDF)</button><button data-act="import" data-k="poPay">استيراد شيت الشحن والسداد</button><button data-act="poNew">إضافة أمر يدوي</button><button data-act="tpl" data-k="po">قالب أوامر الشراء</button><button data-act="tpl" data-k="poPay">قالب الشحن والسداد</button></div></div>
       ${db.settings.poAsTransit && manualTransit && open.some(o => o.lines) ? `<div class="banner warn no-print"><span class="grow">يوجد ${fmt(manualTransit)} سطر بضاعة بالطريق مُدخل يدويًا بجانب أوامر الشراء — إذا كانت نفس الأوامر فهي تنخصم مرتين.</span><button class="sm" data-act="clearManualTransit">مسح بالطريق اليدوي</button><button class="sm" data-act="dataTabGo" data-k="transit">عرض</button></div>` : ''}
       <div class="tabs">${tabs.map(([k, l]) => `<div class="tab ${tab === k ? 'active' : ''}" data-act="poTab" data-k="${k}">${l}</div>`).join('')}</div>${body}`;
   };
@@ -1272,6 +1272,112 @@
         { k: 'payStatus', h: 'السداد', f: o => payPill(o.payStatus) }, { k: 'note', h: 'ملاحظة', cls: 'wrap' }
       ], inH, { sort: 'eta', dir: 1, onRow: o => poModal(o.no), empty: 'لا يوجد', foot: { no: 'الإجمالي', totalSar: money(sum(inH, 'totalSar')), paidSar: money(sum(inH, 'paidSar')), dueSar: money(sum(inH)) } })}</div>`;
   }
+  // ---------- التحديث الشامل: أكثر من ملف مرة وحدة ----------
+  const BULK_KINDS = { po: 'تقرير أوامر الشراء (من النظام)', poPay: 'شيت الشحن والسداد', clearer: 'تقرير المخلّص (بيان المعاملات)', track: 'قالب تحديث المخلّص', skip: '— تجاهل الملف —' };
+  // يعرف نوع الملف من أعمدته: المخلّص ← أوامر الشراء (فيها رقم الصنف والكمية) ← قالب المتابعة (فيه الحاوية) ← الشحن والسداد
+  function detectFileKind(f) {
+    if (!f.sheets || !f.sheets.length) return { kind: 'skip' };
+    if (I.isClearerReport(f.sheets)) return { kind: 'clearer' };
+    let best = null;
+    f.sheets.forEach((sh, si) => {
+      if (!sh.rows.length) return;
+      const po = I.detectHeader(sh.rows, 'po'), pay = I.detectHeader(sh.rows, 'poPay'), tr = I.detectHeader(sh.rows, 'track');
+      const has = (d, k) => d.map[k] != null && d.map[k] >= 0;
+      let c = null;
+      if (has(po, 'poNo') && has(po, 'code') && has(po, 'qty')) c = { kind: 'po', si, det: po, score: 30 + po.score };
+      else if (has(tr, 'status') && (has(tr, 'containerNo') || has(tr, 'portDate') || has(tr, 'emptyDate'))) c = { kind: 'track', si, det: tr, score: 20 + tr.score };
+      else if (has(pay, 'poNo') && (has(pay, 'status') || has(pay, 'shipping') || has(pay, 'paid') || has(pay, 'blNo') || has(pay, 'agent'))) c = { kind: 'poPay', si, det: pay, score: 10 + pay.score };
+      if (c && (!best || c.score > best.score)) best = c;
+    });
+    return best || { kind: 'skip' };
+  }
+  async function bulkImportFiles() {
+    const can1 = can('po_import'), can2 = can('po_payments'), can3 = can('shipping');
+    if (!can1 && !can2 && !can3) return deny('po_import');
+    let files;
+    try { files = await api.openMany({ title: 'اختر الملفات: تقرير أوامر الشراء، شيت الشحن والسداد، تقرير المخلّص' }); }
+    catch (e) { return toast('تعذر قراءة الملفات: ' + e.message, 'bad'); }
+    if (!files || !files.length) return;
+    const items = files.map(f => Object.assign({ f }, detectFileKind(f)));
+    const permOk = k => k === 'po' ? can1 : k === 'poPay' ? can2 : (k === 'clearer' || k === 'track') ? can3 : true;
+    const count = it => {
+      if (it.kind === 'clearer') return I.parseClearerReport(it.f.sheets, db).length + ' معاملة';
+      if (!it.det || !(it.kind in { po: 1, poPay: 1, track: 1 })) return '';
+      const key = it.kind === 'track' ? (['poNo', 'blNo', 'containerNo'].find(k => it.det.map[k] >= 0) || 'poNo') : 'poNo';
+      return I.rowsToRecords(it.f.sheets[it.si].rows, it.det.row, it.det.map, key).length + ' سطر';
+    };
+    const cls = (db.parties || []).filter(p => p.kind === 'clearer');
+    modal({
+      title: `تحديث شامل — ${fmt(files.length)} ملف`, size: 'wide',
+      body: `<div class="hint">البرنامج تعرّف على نوع كل ملف من أعمدته. صحّح النوع إذا لزم. الترتيب في التطبيق: أوامر الشراء ← الشحن والسداد ← المخلّص.</div>
+        <table class="t" style="margin-top:10px"><thead><tr><th>الملف</th><th>النوع</th><th>المحتوى</th><th></th></tr></thead><tbody>
+        ${items.map((it, i) => `<tr><td>${esc(it.f.name)}</td><td><select data-bk="${i}">${Object.entries(BULK_KINDS).map(([k, l]) => `<option value="${k}" ${it.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
+          <td class="small">${it.f.error ? `<span class="pill bad">${esc(it.f.error)}</span>` : esc(count(it))}</td><td>${!permOk(it.kind) ? '<span class="pill bad">ما عندك صلاحية</span>' : ''}</td></tr>`).join('')}
+        </tbody></table>
+        <div class="form f4" style="margin-top:12px">
+          <label class="f">تاريخ تقرير أوامر الشراء<input type="date" class="inp" id="bk_date" value="${today()}"></label>
+          <label class="f">المخلّص (لتقرير المخلّص)<select id="bk_party" class="inp"><option value="">— بدون —</option>${cls.map(p => `<option value="${esc(p.id)}" ${cls.length === 1 ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+        </div>
+        <div class="small" style="margin-top:8px">⚠ تقرير أوامر الشراء لازم يكون <b>كل الأوامر المفتوحة</b>: الأمر المفتوح اللي مو فيه يتحول «وصل المخزون».</div>`,
+      foot: `<button class="primary" data-ok>تطبيق التحديث</button><button data-close>إلغاء</button>`,
+      onMount: m => {
+        m.q('[data-ok]').onclick = async () => {
+          m.qa('[data-bk]').forEach(sel => { const it = items[+sel.dataset.bk]; const k = sel.value; if (k !== it.kind) Object.assign(it, k === 'clearer' || k === 'skip' ? { kind: k } : Object.assign(detectFileKind(it.f), { kind: k })); });
+          for (const it of items) {
+            if (it.kind === 'skip') continue;
+            if (!permOk(it.kind)) return toast(`ما عندك صلاحية لـ «${BULK_KINDS[it.kind]}»`, 'bad');
+            if (it.kind !== 'clearer' && !it.det) { const d = { po: 'po', poPay: 'poPay', track: 'track' }[it.kind]; const sh = it.f.sheets[0]; it.si = 0; it.det = I.detectHeader(sh.rows, d); }
+          }
+          await saveNow(); await api.snapshot('before-bulk-import');
+          const day = m.q('#bk_date').value || today(), partyId = m.q('#bk_party').value;
+          m.close();
+          const out = []; const unmapped = {}; let telex = [];
+          for (const kind of ['po', 'poPay', 'clearer', 'track']) {
+            for (const it of items.filter(x => x.kind === kind)) {
+              try {
+                if (kind === 'po') {
+                  const recs = I.rowsToRecords(it.f.sheets[it.si].rows, it.det.row, it.det.map, 'poNo');
+                  const r = I.applyPOs(db, recs, { date: day, user: ui.user.name, file: it.f.name });
+                  out.push({ t: `📄 ${it.f.name} — أوامر الشراء`, lines: [`${fmt(r.orders)} أمر (${fmt(r.lines)} سطر)`, r.newOrders.length ? `جديد: ${r.newOrders.join('، ')}` : '', (r.closed.length + r.completed.length) ? `وصل المخزون: ${r.closed.concat(r.completed).join('، ')}` : '', r.reopened.length ? `أعيد فتحها: ${r.reopened.join('، ')}` : '', r.added.length ? `أصناف جديدة «غير مصنف»: ${r.added.map(a => a.code).join('، ')}` : ''] });
+                } else if (kind === 'poPay') {
+                  const sh = it.f.sheets[it.si]; const hdr = sh.rows[it.det.row] || [];
+                  const recs = I.rowsToRecords(sh.rows, it.det.row, it.det.map, 'poNo');
+                  const r = I.applyPOPay(db, recs, { date: today(), user: ui.user.name, file: it.f.name, currencyHint: I.currencyFromHeader(hdr[it.det.map.value] || hdr[it.det.map.shipping] || '') });
+                  out.push({ t: `📄 ${it.f.name} — الشحن والسداد`, lines: [`${fmt(r.orders)} أمر — مسدد بالكامل ${fmt(r.paidFull)}`, r.shipped.length ? `صارت «تم الشحن»: ${r.shipped.join('، ')}` : '', r.created.length ? `أوامر جديدة من الشيت: ${r.created.join('، ')}` : '', r.fromNote.length ? `دفعات من الملاحظة (راجعها): ${r.fromNote.join('، ')}` : ''] });
+                } else {
+                  let recs;
+                  if (kind === 'clearer') recs = I.parseClearerReport(it.f.sheets, db);
+                  else { const key = ['poNo', 'blNo', 'containerNo'].find(k => it.det.map[k] >= 0) || 'poNo'; recs = I.rowsToRecords(it.f.sheets[it.si].rows, it.det.row, it.det.map, key); }
+                  const r = I.applyTrack(db, recs, { date: today(), user: ui.user.name, partyId, file: it.f.name });
+                  Object.keys(r.unmapped).forEach(k => { unmapped[k] = (unmapped[k] || 0) + r.unmapped[k]; });
+                  telex = telex.concat(r.matched.filter(no => (db.po.orders[no].track || {}).needTelex));
+                  out.push({ t: `📄 ${it.f.name} — ${kind === 'clearer' ? 'تقرير المخلّص' : 'تحديث المتابعة'}`, lines: [`طابقت ${fmt(r.matched.length)} أمر — تقدمت مرحلته ${fmt(new Set(r.advanced).size)} — حاويات جديدة ${fmt(r.containersAdded)}`, r.notFound.length ? `أوامر مو عندنا: ${[...new Set(r.notFound)].join('، ')}` : ''] });
+                }
+              } catch (e) { out.push({ t: `📄 ${it.f.name}`, lines: ['تعذر التطبيق: ' + e.message], bad: true }); }
+            }
+          }
+          log('تحديث شامل: ' + items.filter(x => x.kind !== 'skip').map(x => x.f.name).join('، '));
+          ui.page = 'po'; commit(); await saveNow();
+          const un = Object.keys(unmapped);
+          modal({
+            title: 'نتيجة التحديث الشامل', size: 'wide',
+            body: out.map(x => `<div class="card" style="margin-bottom:10px"><h3 style="margin-top:0">${esc(x.t)}</h3>${x.lines.filter(Boolean).map(l => {
+              // قائمة طويلة (أكثر من 10 أوامر) ← عدد + تفاصيل تنفتح
+              const m2 = l.match(/^([^:]+):\s*(.+)$/); const parts = m2 ? m2[2].split('، ') : [];
+              if (parts.length > 10) return `<details class="small" style="line-height:1.9"><summary style="cursor:pointer">${esc(m2[1])}: <b>${fmt(parts.length)}</b></summary>${esc(m2[2])}</details>`;
+              return `<div class="small" style="line-height:1.9;${x.bad ? 'color:var(--bad)' : ''}">${esc(l)}</div>`;
+            }).join('')}</div>`).join('') +
+              (telex.length ? `<div class="banner bad">⚠ المخلّص ينتظر التلكس منّا في ${fmt(new Set(telex).size)} أمر</div>` : '') +
+              (un.length ? `<div class="banner warn">حالات من المخلّص ما لها مرحلة: ${un.map(t => `«${esc(t)}»`).join('، ')} — حددها من الإعدادات ← تحويل الحالات</div>` : '') +
+              (db.settings.poAsTransit && db.transit.length ? `<div class="banner warn">يوجد ${fmt(db.transit.length)} سطر بضاعة بالطريق يدوي — إذا كانت نفس أوامر الشراء امسحها حتى لا تنخصم مرتين.</div>` : ''),
+            foot: `<button class="primary" data-close>تم</button><button data-cash>الكاش المطلوب</button>${canSee('ship') ? '<button data-ship>المعاملات الخارجية</button>' : ''}`,
+            onMount: mm => { mm.q('[data-cash]').onclick = () => { mm.close(); ui.poTab = 'cash'; go('po'); }; const b = mm.q('[data-ship]'); if (b) b.onclick = () => { mm.close(); go('ship'); }; }
+          });
+        };
+      }
+    });
+  }
+
   function poImportResult(kind, r, msg) {
     const list = (title, arr) => arr.length ? `<h3>${title} (${fmt(arr.length)})</h3><div class="small" style="line-height:1.9">${arr.map(esc).join('، ')}</div>` : '';
     const body = kind === 'po'
@@ -2268,6 +2374,7 @@
     partyAdd: el => { db.parties.push({ id: 'P' + Date.now(), kind: el.dataset.k, name: el.dataset.k === 'clearer' ? 'مخلّص جديد' : 'وكيل جديد', contact: '', phone: '', email: '', freeDays: null, statusMap: [] }); commit(); },
     partyDel: async el => { const p = db.parties[+el.dataset.i]; if (!await confirmBox(`حذف «${esc(p.name)}»؟`, { ok: 'حذف', danger: true })) return; db.parties.splice(+el.dataset.i, 1); commit(); },
     partyMap: el => statusMapModal(+el.dataset.i),
+    poBulkImport: () => bulkImportFiles(),
     poTab: el => { ui.poTab = el.dataset.k; go('po'); },
     poQuickShip: el => {
       const no = el.dataset.k, o = db.po.orders[no];
