@@ -185,6 +185,7 @@
     if (!Array.isArray(d.shipStages) || !d.shipStages.length) d.shipStages = E.defaultShipStages();
     if (!Array.isArray(d.parties)) d.parties = [];
     if (!Array.isArray(d.trackStatusMap)) d.trackStatusMap = [];
+    if (!d.clearerForm || !Array.isArray(d.clearerForm.txStatuses)) d.clearerForm = I.defaultClearerForm();
     // ترقية الصلاحيات: المستخدم المطابق لقالب ياخذ إضافات القالب الجديدة (المعاملات الخارجية)
     if ((d.meta.permsV || 1) < 2) {
       for (const u of d.users) {
@@ -399,12 +400,12 @@
     delMonth: 'import_data', clearTransit: 'import_data', delTransit: 'import_data', addTransit: 'import_data',
     importLegacy: 'data_admin', restoreBackup: 'data_admin', resetAll: 'data_admin', archDel: 'data_admin', chooseShared: 'data_admin', resetDataDir: 'data_admin',
     approve: 'approve',
-    addType: 'settings', delType: 'settings', addExc: 'settings', delExc: 'settings', addGroup: 'settings', renGroup: 'settings', delGroup: 'settings',     addCur: 'settings', delCur: 'settings', stgMove: 'settings', stgDel: 'settings', stgAdd: 'settings', stgReset: 'settings', partyAdd: 'shipping', partyDel: 'shipping', partyMap: 'shipping', shipNext: 'shipping',
+    addType: 'settings', delType: 'settings', addExc: 'settings', delExc: 'settings', addGroup: 'settings', renGroup: 'settings', delGroup: 'settings',     addCur: 'settings', delCur: 'settings', stgMove: 'settings', stgDel: 'settings', stgAdd: 'settings', stgReset: 'settings', cformAdd: 'settings', cformDel: 'settings', cformReset: 'settings', tplTrack: 'export', partyAdd: 'shipping', partyDel: 'shipping', partyMap: 'shipping', shipNext: 'shipping',
     addUser: 'users', editUser: 'users',
     pgExcel: 'export', pgPdf: 'export', pgPrint: 'export', tpl: 'export', tplItemsFull: 'export', exportBackup: 'export',
     poReceive: 'po_import', poReopen: 'po_import', clearManualTransit: 'import_data', poQuickRecv: 'po_import', poQuickShip: 'po_import', poQuickPay: 'po_payments', poNew: 'po_payments'
   };
-  const CHG_PERM = { stg: 'settings', party: 'shipping', adj: 'adjust', reason: 'adjust', stockDate: 'import_data', set: 'settings', setBool: 'settings', setPct: 'settings', type: 'settings', cls: 'settings', exc: 'settings', cur: 'settings' };
+  const CHG_PERM = { cform: 'settings', cformList: 'settings', stg: 'settings', party: 'shipping', adj: 'adjust', reason: 'adjust', stockDate: 'import_data', set: 'settings', setBool: 'settings', setPct: 'settings', type: 'settings', cls: 'settings', exc: 'settings', cur: 'settings' };
   const IMPORT_PERM = { track: 'shipping', items: 'items', sales: 'import_data', stock: 'import_data', transit: 'import_data', po: 'po_import', poPay: 'po_payments' };
 
   function pageAuth() {
@@ -1562,7 +1563,7 @@
     const cnt = g => all.filter(t => t.group === g).length;
     const parties = (db.parties || []).map(p => p.name);
     return `<div class="page-head"><div><h1>المعاملات الخارجية</h1><div class="sub">متابعة كل أمر شراء خارجي من الإصدار حتى تسليم الحاوية فارغة للوكيل — المرجع: رقم أمر الشراء</div></div>
-      <div class="actions"><button class="primary" data-act="import" data-k="track">استيراد تحديث المخلّص / الوكيل</button><button data-act="tpl" data-k="track">قالب التحديث</button>${can('settings') ? '<button data-act="nav" data-p="settings">المراحل والجهات</button>' : ''}</div></div>
+      <div class="actions"><button class="primary" data-act="import" data-k="track">استيراد تحديث المخلّص / الوكيل</button><button data-act="tplTrack">النموذج الموحد للمخلّصين</button>${can('settings') ? '<button data-act="nav" data-p="settings">المراحل والجهات</button>' : ''}</div></div>
       ${demurrageBanner()}
       <div class="kpis" style="grid-template-columns:repeat(7,minmax(0,1fr))">
         ${GROUPS.map(g => `<div class="kpi click" data-act="shipGroup" data-k="${g}" style="cursor:pointer"><div class="l">${g}</div><div class="v">${fmt(cnt(g))}</div><div class="s">أمر</div></div>`).join('')}
@@ -1675,6 +1676,7 @@
         <label class="f">أيام السماح الافتراضية للحاوية<input class="inp" type="number" step="1" min="0" data-chg="set" data-k="defaultFreeDays" value="${esc(db.settings.defaultFreeDays)}"></label>
         <label class="f">نبّهني قبل انتهاء أيام السماح بـ (يوم)<input class="inp" type="number" step="1" min="0" data-chg="set" data-k="demurrageWarnDays" value="${esc(db.settings.demurrageWarnDays)}"></label>
       </div></div>
+    ${clearerFormSettingsHtml()}
     <div class="card"><h2>الوكلاء ومكاتب الشحن والمخلّصين</h2>
       <div class="hint">أيام السماح للوكيل تغلب الافتراضي. لكل جهة جدول «تحويل الحالات»: النص اللي يكتبه المخلّص في شيته ← مرحلتنا.</div>
       <div style="overflow:auto"><table class="t" style="margin-top:8px"><thead><tr><th>النوع</th><th>الاسم</th><th>الشخص المسؤول</th><th>الجوال</th><th>الإيميل</th><th>أيام السماح</th><th>تحويل الحالات</th><th></th></tr></thead><tbody>
@@ -1942,8 +1944,8 @@
       }).join('') || '<tr><td colspan="9" class="muted">لا توجد فترات استثنائية</td></tr>'}
       </tbody></table></div><button class="sm" data-act="addExc" style="margin-top:8px">+ إضافة فترة استثنائية</button></div>
 
-    <div class="grid g2">
     ${shipSettingsHtml()}
+    <div class="grid g2">
     <div class="card"><h2>المجموعات الرئيسية</h2>
       <div class="month-chips">${db.groups.map((g, i) => `<span class="chip">${esc(g)} <span class="small">${fmt(db.items.filter(x => x.group === g).length)}</span> <span class="x" data-act="renGroup" data-i="${i}" title="إعادة تسمية">✎</span> <span class="x" data-act="delGroup" data-i="${i}" title="حذف">✕</span></span>`).join('')}</div>
       <button class="sm" data-act="addGroup" style="margin-top:10px">+ إضافة مجموعة</button></div>
@@ -2209,22 +2211,71 @@
   function exportSales() {
     exportSpec({ sheets: [{ name: 'المبيعات', columns: [{ header: 'الشهر', key: 'month', width: 10 }, { header: 'رقم الصنف', key: 'code', width: 13 }, { header: 'اسم الصنف', key: 'name', width: 40 }, { header: 'الوحدة', key: 'unit', width: 9 }, { header: 'الوارد (مرتجع)', key: 'returned', width: 12 }, { header: 'المنصرف', key: 'issued', width: 12 }], rows: db.sales.slice().sort((a, b) => a.month.localeCompare(b.month)) }] }, 'المبيعات');
   }
-  // قالب تحديث المخلّص / الوكيل: معبّأ بمعاملاتنا النشطة + قائمة منسدلة بالحالات المعتمدة
-  function trackTemplateSpec() {
-    const st = db.shipStages || [];
-    const ts = E.trackSummary(db, today()).filter(t => !t.closed && (t.foreign || db.po.orders[t.no].track));
+  // النموذج الموحد للمخلّصين: معبّأ بمعاملاتنا (للمخلّص المختار أو الكل) + قوائم منسدلة إلزامية من ورقة «القوائم»
+  function trackTemplateSpec(partyId) {
+    const F = db.clearerForm || I.defaultClearerForm();
+    const ts = E.trackSummary(db, today()).filter(t => !t.closed && (t.foreign || db.po.orders[t.no].track) && (!partyId || (db.po.orders[t.no].track || {}).clearer === partyId || !(db.po.orders[t.no].track || {}).clearer && t.stageIdx >= (db.shipStages || []).findIndex(s => s.marks === 'shipped')));
     const rows = [];
     for (const t of ts) {
-      const base = { poNo: t.no, blNo: t.blNo, status: t.stageName, statusDate: '', note: '' };
-      if (t.containers.length) for (const c of t.containers) rows.push(Object.assign({}, base, { containerNo: c.no, portDate: c.portAt || '', warehouseDate: c.warehouseAt || '', emptyDate: c.emptyAt || '' }));
-      else rows.push(Object.assign({}, base, { containerNo: '', portDate: '', warehouseDate: '', emptyDate: '' }));
+      const o = db.po.orders[t.no], tr = o.track || {}, ci = tr.clearerInfo || {};
+      const base = { poNo: t.no, consig: ci.consig || '', blNo: t.blNo, docType: tr.docType || '', shipAgent: ci.agent || '', origin: ci.origin || '', port: ci.port || '', portEta: tr.portEta || '', bayan: ci.bayan || '', needTelex: tr.needTelex ? 'نعم' : '' };
+      if (t.containers.length) for (const c of t.containers) rows.push(Object.assign({}, base, { containerNo: c.no, containerType: c.type || '', portDate: c.portAt || '', warehouseDate: c.warehouseAt || '', emptyDate: c.emptyAt || '' }));
+      else rows.push(Object.assign({}, base, { containerNo: '' }));
     }
-    const listRef = "'الحالات المعتمدة'!$A$2:$A$" + (st.length + 1);
-    const cols = I.KINDS.track.fields.map(f => ({ header: f.label, key: f.key, width: f.key === 'status' ? 34 : f.key === 'note' ? 30 : 16, input: f.key !== 'poNo', listRef: f.key === 'status' ? listRef : undefined }));
+    const lists = [
+      ['حالة الشحنة', F.shipStatuses.map(x => x.text)], ['حالة المعاملة', F.txStatuses.map(x => x.text)], ['المنشأ', F.origins], ['المنفذ', F.ports],
+      ['نوع وحجم الحاوية', F.containerTypes], ['نوع المستند', F.docTypes], ['نعم / لا', F.yesNo]
+    ];
+    const L = 'ABCDEFG';
+    const ref = i => "'القوائم'!" + '$' + L[i] + '$2:$' + L[i] + '$' + (lists[i][1].length + 1);
+    const listOf = { shipStatus: 0, status: 1, origin: 2, port: 3, containerType: 4, docType: 5, linked: 6, doIssued: 6, needTelex: 6 };
+    const wide = { poNo: 14, status: 30, note: 34, shipAgent: 16, port: 26, blNo: 18, containerNo: 16 };
+    const dateKeys = ['statusDate', 'portEta', 'portDate', 'warehouseDate', 'emptyDate'];
+    const cols = I.KINDS.track.fields.map(f => ({ header: f.label, key: f.key, width: wide[f.key] || 14, input: f.key !== 'poNo', listRef: listOf[f.key] != null ? ref(listOf[f.key]) : undefined, listStrict: listOf[f.key] != null, fmt: dateKeys.includes(f.key) ? 'yyyy-mm-dd' : undefined }));
+    const maxLen = Math.max(...lists.map(l => l[1].length));
+    const listRows = Array.from({ length: maxLen }, (_, i) => Object.fromEntries(lists.map((l, j) => ['c' + j, l[1][i] || ''])));
+    const party = (db.parties || []).find(p => p.id === partyId);
+    const company = db.settings.companyName || '';
     return { sheets: [
-      { name: 'تحديث المعاملات', title: 'تحديث حالة المعاملات' + (db.settings.companyName ? ' — ' + db.settings.companyName : ''), subtitle: 'سطر لكل حاوية. اختر «حالة المعاملة» من القائمة، واكتب تاريخها والتواريخ بصيغة 2026-12-31. لا تغيّر رقم الأمر. أضف سطر لأي حاوية جديدة.', columns: cols, rows },
-      { name: 'الحالات المعتمدة', columns: [{ header: 'الحالة', key: 'name', width: 46 }, { header: 'عند', key: 'party', width: 14 }, { header: 'الترتيب', key: 'i', width: 8 }], rows: st.map((x, i) => ({ name: x.name, party: x.party || '', i: i + 1 })) }
+      { name: 'تحديث المعاملات', title: 'نموذج تحديث المعاملات الجمركية' + (company ? ' — ' + company : '') + (party ? ' — ' + party.name : ''), subtitle: 'سطر لكل حاوية. الخانات الملونة تُختار من القائمة فقط. التواريخ بصيغة 2026-12-31. لا تغيّر رقم أمر الشراء، وأضف سطر لأي حاوية جديدة.', columns: cols, rows },
+      { name: 'القوائم', columns: lists.map((l, j) => ({ header: l[0], key: 'c' + j, width: 28 })), rows: listRows },
+      { name: 'تعليمات', columns: [{ header: 'التعليمات', key: 't', width: 110 }], rows: [
+        { t: '1. سطر لكل حاوية. إذا الشحنة فيها أكثر من حاوية، كرر رقم أمر الشراء والبوليصة في كل سطر.' },
+        { t: '2. «حالة الشحنة»: لم تصل / على الباخرة / وصلت الميناء.' },
+        { t: '3. «حالة المعاملة»: آخر حالة للمعاملة عندكم من القائمة، و«تاريخ الحالة» تاريخها.' },
+        { t: '4. «وصول المنفذ المتوقع» قبل الوصول، و«وصول المنفذ الفعلي» بعد الوصول.' },
+        { t: '5. «مطلوب تلكس منّا» = نعم إذا تنتظرون التلكس أو المستندات منّا.' },
+        { t: '6. عند تسليم الحاوية فارغة للوكيل اكتب تاريخها في «تاريخ تسليم الحاوية فارغة» وأرفقوا المستند.' },
+        { t: '7. لا تغيّر أسماء الأعمدة ولا ترتيبها.' }
+      ] }
     ] };
+  }
+  function trackTemplateDialog() {
+    const cls = (db.parties || []).filter(p => p.kind === 'clearer');
+    modal({
+      title: 'النموذج الموحد للمخلّصين', size: 'narrow',
+      body: `<div class="hint">نموذج Excel معبّأ بمعاملاتنا النشطة، وخانات الحالات والمنافذ والدول وأنواع الحاويات قوائم منسدلة ثابتة — كل المخلّصين يعبّونه بنفس القيم.</div>
+        <label class="f" style="margin-top:10px">لمخلّص<select id="tp_party"><option value="">— كل المعاملات النشطة —</option>${cls.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label>
+        <p class="small">مع اختيار مخلّص: معاملاته + المشحونة اللي ما لها مخلّص بعد.</p>`,
+      foot: `<button class="primary" data-ok>تنزيل النموذج</button><button data-close>إلغاء</button>`,
+      onMount: m => { m.q('[data-ok]').onclick = () => { const pid = m.q('#tp_party').value; const p = cls.find(x => x.id === pid); m.close(); exportSpec(trackTemplateSpec(pid), 'نموذج-تحديث-المخلص' + (p ? '-' + p.name : '')); }; }
+    });
+  }
+  // إعدادات القوائم المنسدلة للنموذج الموحد
+  function clearerFormSettingsHtml() {
+    const F = db.clearerForm;
+    const stOpts = sel => `<option value="__none" ${sel === '__none' ? 'selected' : ''}>— محايدة (بدون تغيير) —</option>${(db.shipStages || []).map(s => `<option value="${esc(s.id)}" ${sel === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}`;
+    const statusTable = (key, title) => `<h3>${title}</h3><table class="t" style="max-width:760px"><thead><tr><th>القيمة في القائمة</th><th>مرحلتنا</th><th></th></tr></thead><tbody>
+      ${F[key].map((x, i) => `<tr><td><input class="inp" style="width:280px" data-chg="cform" data-l="${key}" data-i="${i}" data-k="text" value="${esc(x.text)}"></td><td><select class="inp" data-chg="cform" data-l="${key}" data-i="${i}" data-k="stage">${stOpts(x.stage)}</select></td><td><button class="sm danger" data-act="cformDel" data-l="${key}" data-i="${i}">حذف</button></td></tr>`).join('')}
+      </tbody></table><button class="sm" data-act="cformAdd" data-l="${key}" style="margin-top:6px">+ إضافة</button>`;
+    const listBox = (key, title) => `<label class="f">${title} (سطر لكل قيمة)<textarea rows="7" data-chg="cformList" data-l="${key}" style="font:inherit">${esc(F[key].join('\n'))}</textarea></label>`;
+    return `<div class="card"><h2>النموذج الموحد للمخلّصين — القوائم المنسدلة</h2>
+      <div class="hint">هذي القيم اللي تطلع في قوائم النموذج. كل حالة مربوطة بمرحلة عندنا، فالاستيراد يحرّك المرحلة تلقائيًا. «محايدة» = تتسجل بدون تغيير المرحلة. <button class="link" data-act="tplTrack">تنزيل النموذج</button></div>
+      ${statusTable('shipStatuses', 'حالة الشحنة')}
+      ${statusTable('txStatuses', 'حالة المعاملة')}
+      <div class="form f4" style="margin-top:12px">${listBox('origins', 'المنشأ')}${listBox('ports', 'المنفذ')}${listBox('containerTypes', 'نوع وحجم الحاوية')}${listBox('docTypes', 'نوع المستند')}</div>
+      <button class="sm" data-act="cformReset" style="margin-top:8px">استرجاع القوائم الافتراضية</button>
+    </div>`;
   }
   function templateSpec(kind, withData) {
     if (kind === 'track') return trackTemplateSpec();
@@ -2375,6 +2426,10 @@
     partyDel: async el => { const p = db.parties[+el.dataset.i]; if (!await confirmBox(`حذف «${esc(p.name)}»؟`, { ok: 'حذف', danger: true })) return; db.parties.splice(+el.dataset.i, 1); commit(); },
     partyMap: el => statusMapModal(+el.dataset.i),
     poBulkImport: () => bulkImportFiles(),
+    tplTrack: () => trackTemplateDialog(),
+    cformAdd: el => { db.clearerForm[el.dataset.l].push({ text: 'حالة جديدة', stage: '__none' }); commit(); },
+    cformDel: el => { db.clearerForm[el.dataset.l].splice(+el.dataset.i, 1); commit(); },
+    cformReset: async () => { if (!await confirmBox('استرجاع القوائم الافتراضية للنموذج الموحد؟', { ok: 'استرجاع', danger: true })) return; db.clearerForm = I.defaultClearerForm(); commit(); },
     poTab: el => { ui.poTab = el.dataset.k; go('po'); },
     poQuickShip: el => {
       const no = el.dataset.k, o = db.po.orders[no];
@@ -2653,6 +2708,10 @@
       else t[key] = num(el.value);
       return commit();
     }
+    if (k === 'cform') {
+      const x = db.clearerForm[el.dataset.l][+el.dataset.i]; x[el.dataset.k] = el.dataset.k === 'text' ? el.value.trim() : el.value; return commit();
+    }
+    if (k === 'cformList') { db.clearerForm[el.dataset.l] = el.value.split('\n').map(x => x.trim()).filter(Boolean); return commit(); }
     if (k === 'stg') {
       const x = db.shipStages[+el.dataset.i], key = el.dataset.k;
       if (key === 'days') x.days = el.value === '' ? '' : num(el.value);

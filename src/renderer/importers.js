@@ -98,14 +98,28 @@
       title: 'تحديث المخلّص / الوكيل',
       fields: [
         { key: 'poNo', label: 'رقم أمر الشراء', aliases: ['رقم أمر الشراء', 'رقم الأمر', 'رقم الامر', 'امر الشراء', 'po'] },
-        { key: 'blNo', label: 'رقم البوليصة', aliases: ['رقم البوليصة', 'البوليصة', 'بوليصة الشحن', 'bl', 'blno', 'b/l', 'رقم التلكس'] },
+        { key: 'consig', label: 'رقم المعاملة لدى المخلّص', aliases: ['رقم المعاملة لدى المخلّص', 'رقم المعاملة لدى المخلص', 'رقم المعامله', 'رقم المعاملة', 'consig'] },
+        { key: 'blNo', label: 'رقم البوليصة', aliases: ['رقم البوليصة', 'رقم البوليصه', 'البوليصة', 'بوليصة الشحن', 'bl', 'blno', 'b/l', 'رقم التلكس'] },
+        { key: 'docType', label: 'نوع المستند', aliases: ['نوع المستند', 'نوع مستند الشحن', 'بوليصة او تلكس'] },
         { key: 'containerNo', label: 'رقم الحاوية', aliases: ['رقم الحاوية', 'الحاوية', 'container', 'containerno', 'cntr'] },
-        { key: 'status', label: 'حالة المعاملة', aliases: ['حالة المعاملة', 'الحالة', 'حالة الشحنة', 'status'] },
+        { key: 'containerType', label: 'نوع وحجم الحاوية', aliases: ['نوع وحجم الحاوية', 'نوع الحاوية', 'حجم الحاوية', 'عدد'] },
+        { key: 'shipAgent', label: 'وكيل الملاحة', aliases: ['وكيل الملاحة', 'الخط الملاحي', 'الوكيل', 'agent'] },
+        { key: 'origin', label: 'المنشأ', aliases: ['المنشأ', 'بلد المنشأ', 'coo'] },
+        { key: 'port', label: 'المنفذ', aliases: ['المنفذ', 'الميناء', 'منفذ الوصول', 'port'] },
+        { key: 'shipStatus', label: 'حالة الشحنة', aliases: ['حالة الشحنة', 'status.n', 'حالة الوصول'] },
+        { key: 'status', label: 'حالة المعاملة', aliases: ['حالة المعاملة', 'الحالة', 'status'] },
         { key: 'statusDate', label: 'تاريخ الحالة', aliases: ['تاريخ الحالة', 'التاريخ', 'تاريخ التحديث', 'date'] },
-        { key: 'portDate', label: 'تاريخ وصول الميناء', aliases: ['تاريخ وصول الميناء', 'وصول الميناء', 'تاريخ الوصول', 'eta port', 'arrival'] },
+        { key: 'portEta', label: 'وصول المنفذ المتوقع', aliases: ['وصول المنفذ المتوقع', 'تاريخ الوصول المتوقع للمنفذ', 'eta'] },
+        { key: 'portDate', label: 'وصول المنفذ الفعلي', aliases: ['وصول المنفذ الفعلي', 'تاريخ وصول الميناء', 'وصول الميناء', 'تاريخ الوصول', 'arrival'] },
+        { key: 'bayan', label: 'رقم البيان الجمركي', aliases: ['رقم البيان الجمركي', 'البيان الجمركي', 'رقم البيان', 'bayan'] },
+        { key: 'duties', label: 'الرسوم الجمركية', aliases: ['الرسوم الجمركية', 'الرسوم', 'duties'] },
+        { key: 'opsFee', label: 'رسوم العمليات', aliases: ['رسوم العمليات', 'عمليات', 'مصاريف التخليص'] },
+        { key: 'linked', label: 'تم الربط', aliases: ['تم الربط', 'ربط', 'lk'] },
+        { key: 'doIssued', label: 'إذن التسليم', aliases: ['إذن التسليم', 'اذن التسليم', 'تسليم', 'do'] },
+        { key: 'needTelex', label: 'مطلوب تلكس منّا', aliases: ['مطلوب تلكس منّا', 'مطلوب تلكس منا', 'مطلوب تلكس', 'need telex'] },
         { key: 'warehouseDate', label: 'تاريخ الوصول للمستودع', aliases: ['تاريخ الوصول للمستودع', 'وصول المستودع', 'تاريخ التسليم للمستودع'] },
         { key: 'emptyDate', label: 'تاريخ تسليم الحاوية فارغة', aliases: ['تاريخ تسليم الحاوية فارغة', 'تسليم الفارغ', 'إرجاع الحاوية', 'empty return'] },
-        { key: 'note', label: 'ملاحظة', aliases: ['ملاحظة', 'ملاحظات', 'note'] }
+        { key: 'note', label: 'ملاحظات', aliases: ['ملاحظات', 'ملاحظة', 'note'] }
       ]
     },
     transit: {
@@ -418,7 +432,15 @@
   const isSerialDate = v => typeof v === 'number' && v > 40000 && v < 60000;
   const serialToIso = v => new Date(Math.round((v - 25569) * 86400000)).toISOString().slice(0, 10);
   function isClearerReport(sheets) {
-    return sheets.some(sh => sh.rows.slice(0, 40).some(r => { const t = norm((r || []).join(' ')); return t.includes(norm('رقم البوليصه')) && t.includes(norm('رقم الحاوية')); }));
+    // تقرير المخلّص (Crystal): فيه البوليصة والحاوية + علامة خاصة به (مسلسل / بيان المعاملات / Status.N).
+    // نموذجنا الموحد فيه «رقم أمر الشراء» كعمود ← مو تقرير مخلّص.
+    return sheets.some(sh => {
+      const head = sh.rows.slice(0, 40).map(r => norm((r || []).join(' ')));
+      const all = head.join(' ');
+      if (all.includes(norm('رقم أمر الشراء'))) return false;
+      return head.some(t => t.includes(norm('رقم البوليصه')) && t.includes(norm('رقم الحاوية'))) &&
+        (all.includes(norm('مسلسل')) || all.includes(norm('بيان المعاملات')) || all.includes(norm('Status.N')));
+    });
   }
   function parseClearerReport(sheets, db) {
     const sh = sheets.find(s => s.rows.slice(0, 40).some(r => norm((r || []).join(' ')).includes(norm('رقم الحاوية'))));
@@ -477,6 +499,23 @@
     }
     return out;
   }
+  // النموذج الموحد للمخلّصين: القوائم المنسدلة الثابتة (تتعدل من الإعدادات). كل حالة مربوطة بمرحلة عندنا.
+  function defaultClearerForm() {
+    return {
+      shipStatuses: [{ text: 'لم تصل', stage: 'shipped' }, { text: 'على الباخرة', stage: 'shipped' }, { text: 'وصلت الميناء', stage: 'port' }],
+      txStatuses: [
+        { text: 'إنتظار', stage: '__none' }, { text: 'بانتظار المستندات / التلكس منّا', stage: '__none' }, { text: 'استلمنا المستندات', stage: 'toClearer' },
+        { text: 'تم الربط مع الوكيل', stage: 'customs' }, { text: 'تم تقديم البيان الجمركي', stage: 'customs' }, { text: 'تحصيل رسوم', stage: 'customs' },
+        { text: 'فحص / معاينة', stage: 'customs' }, { text: 'تم الفسح', stage: 'released' }, { text: 'جاري النقل', stage: 'released' },
+        { text: 'تم النقل للمستودع', stage: 'warehouse' }, { text: 'تم تسليم الحاوية فارغة', stage: 'emptyReturned' }
+      ],
+      origins: ['الصين', 'الهند', 'تركيا', 'مصر', 'الإمارات', 'فيتنام', 'ماليزيا', 'إندونيسيا', 'تايلاند', 'إيطاليا', 'إسبانيا', 'ألمانيا', 'أخرى'],
+      ports: ['ميناء جدة الإسلامي', 'ميناء الملك عبدالعزيز بالدمام', 'ميناء الملك عبدالله', 'ميناء الجبيل التجاري', 'منفذ البطحاء', 'منفذ الحديثة', 'مطار الملك خالد', 'أخرى'],
+      containerTypes: ['20 جاف', '20 مبرد', '40 جاف', '40 مبرد', '40 HC', '45 HC', 'طرود (LCL)'],
+      docTypes: ['بوليصة', 'تلكس'],
+      yesNo: ['نعم', 'لا']
+    };
+  }
   // حالات المخلّص الافتراضية ← مراحلنا (تتعدل من الإعدادات). «__none» = حالة محايدة ما تغيّر المرحلة
   const DEFAULT_CLEARER_MAP = [
     { text: 'NOT ARRIVED', stage: 'shipped' }, { text: 'On vessel', stage: 'shipped' }, { text: 'Arrived', stage: 'port' },
@@ -489,7 +528,8 @@
   function mapTrackStatus(db, text, partyId) {
     const t = norm(text); if (!t) return '';
     const party = (db.parties || []).find(p => p.id === partyId);
-    const maps = [].concat((party && party.statusMap) || [], db.trackStatusMap || []);
+    const form = db.clearerForm || {};
+    const maps = [].concat((party && party.statusMap) || [], db.trackStatusMap || [], form.shipStatuses || [], form.txStatuses || []);
     for (const m of maps) if (m.text && m.stage && norm(m.text) === t) return m.stage;
     // الحالات الافتراضية لتقارير المخلّص (إذا ما عُرّفت في الجداول)
     for (const m of DEFAULT_CLEARER_MAP) if (norm(m.text) === t && !maps.some(x => norm(x.text) === t)) return m.stage;
@@ -525,7 +565,20 @@
         const ed = toDate(r.emptyDate); if (ed) c.emptyAt = ed;
       }
       if (!conts.length) { const pd = toDate(r.portDate); if (pd) o.track.portAt = pd; }
-      if (r.portEta) o.track.portEta = r.portEta; // الوصول المتوقع للميناء من المخلّص
+      // النموذج الموحد: حالتين (الشحنة + المعاملة) وبيانات إضافية
+      if (!r.statuses && (r.shipStatus != null || r.status != null)) r.statuses = [r.shipStatus, r.status].filter(x => x != null && String(x).trim());
+      const yes = v => /^(نعم|yes|y|1|✓|\*)$/i.test(String(v == null ? '' : v).trim());
+      const formKeys = ['consig', 'docType', 'containerType', 'shipAgent', 'origin', 'port', 'bayan', 'duties', 'opsFee', 'linked', 'doIssued', 'needTelex'];
+      if (!r.extra && formKeys.some(k => r[k] != null && String(r[k]).trim() !== '')) {
+        r.extra = { consig: r.consig ? String(r.consig) : undefined, agent: r.shipAgent || undefined, origin: r.origin || undefined, port: r.port || undefined, bayan: r.bayan ? String(r.bayan) : undefined,
+          duties: r.duties != null && r.duties !== '' ? num(r.duties) : undefined, opsFee: r.opsFee != null && r.opsFee !== '' ? num(r.opsFee) : undefined,
+          flags: [yes(r.linked) ? 'ربط' : '', yes(r.doIssued) ? 'تسليم' : ''].filter(Boolean), needTelex: yes(r.needTelex) };
+        Object.keys(r.extra).forEach(k => r.extra[k] === undefined && delete r.extra[k]);
+        if (r.portEta && !/^\d{4}-\d{2}-\d{2}$/.test(String(r.portEta))) r.portEta = toDate(r.portEta);
+      }
+      if (r.docType && String(r.docType).trim()) o.track.docType = String(r.docType).trim();
+      if (r.containerType && conts.length) for (const c of o.track.containers) if (conts.includes(c.no)) c.type = String(r.containerType).trim();
+      if (r.portEta) o.track.portEta = toDate(r.portEta) || r.portEta; // الوصول المتوقع للميناء من المخلّص
       if (r.extra) { o.track.clearerInfo = Object.assign({}, o.track.clearerInfo || {}, r.extra, { at: day }); o.track.needTelex = !!r.extra.needTelex; }
       if (r.note != null && r.extra) o.track.clearerNote = r.note;
       const texts = (r.statuses && r.statuses.length ? r.statuses : [r.status]).filter(x => x != null && String(x).trim()).map(x => String(x).trim());
@@ -668,7 +721,7 @@
     if (/يورو|eur/i.test(t)) return 'EUR';
     return '';
   }
-  const Importers = { isClearerReport, parseClearerReport, DEFAULT_CLEARER_MAP, applyTrack, mapTrackStatus, currencyFromHeader, KINDS, applyPOs, applyPOPay, toDate, curCode, detectHeader, rowsToRecords, applyItems, applySales, applyStock, applyTransit, autoAddItems, importLegacy, isLegacyWorkbook, syncGroups, parseActive };
+  const Importers = { defaultClearerForm, isClearerReport, parseClearerReport, DEFAULT_CLEARER_MAP, applyTrack, mapTrackStatus, currencyFromHeader, KINDS, applyPOs, applyPOPay, toDate, curCode, detectHeader, rowsToRecords, applyItems, applySales, applyStock, applyTransit, autoAddItems, importLegacy, isLegacyWorkbook, syncGroups, parseActive };
   if (typeof module !== 'undefined' && module.exports) module.exports = Importers;
   else root.Importers = Importers;
 })(typeof window !== 'undefined' ? window : globalThis);

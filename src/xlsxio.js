@@ -93,6 +93,7 @@ async function writeWorkbook(filePath, spec) {
       sh.columns.forEach((col, i) => {
         let v = obj[col.key];
         if (v === undefined) v = null;
+        if (col.fmt === 'yyyy-mm-dd' && typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) v = new Date(v + 'T00:00:00Z');
         row.getCell(i + 1).value = v;
       });
     }
@@ -109,7 +110,7 @@ async function writeWorkbook(filePath, spec) {
     sh.columns.forEach((col, i) => {
       if (!col.listRef) return;
       for (let rr = firstData; rr <= firstData + sh.rows.length + 500; rr++) {
-        ws.getCell(rr, i + 1).dataValidation = { type: 'list', allowBlank: true, showErrorMessage: true, errorStyle: 'warning', errorTitle: 'حالة غير معتمدة', error: 'اختر الحالة من القائمة', formulae: [col.listRef] };
+        ws.getCell(rr, i + 1).dataValidation = { type: 'list', allowBlank: true, showErrorMessage: true, errorStyle: col.listStrict ? 'stop' : 'warning', errorTitle: 'قيمة غير معتمدة', error: 'اختر من القائمة المنسدلة', formulae: [col.listRef] };
       }
     });
   }
