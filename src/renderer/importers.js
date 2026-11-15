@@ -26,6 +26,8 @@
         { key: 'active', label: 'نشاط الصنف', aliases: ['نشاط الصنف', 'النشاط', 'الحالة', 'active', 'status'] },
         { key: 'leadOverride', label: 'فترة توصيل خاصة (شهر)', aliases: ['فترة توصيل خاصة (شهر)', 'فترة توصيل خاصة', 'فترة التوصيل', 'leadtime'] },
         { key: 'extraOverride', label: 'أشهر إضافية خاصة', aliases: ['أشهر إضافية خاصة', 'أشهر إضافية بقرار الإدارة', 'اشهر اضافيه', 'extramonths'] },
+        { key: 'prepDays', label: 'مدة التجهيز (يوم)', aliases: ['مدة التجهيز (يوم)', 'مدة التجهيز', 'التجهيز', 'prepdays'] },
+        { key: 'shipDays', label: 'مدة الشحن (يوم)', aliases: ['مدة الشحن (يوم)', 'مدة الشحن', 'shipdays'] },
         { key: 'refCost', label: 'تكلفة مرجعية', aliases: ['تكلفة مرجعية', 'تكلفة مرجعية (إذا لم يوجد في المخزون)', 'التكلفة', 'تكلفة الوحدة', 'cost'] },
         { key: 'notes', label: 'ملاحظات', aliases: ['ملاحظات', 'notes'] },
         { key: 'u2', label: 'وحدة 2', aliases: ['وحدة 2', 'وحدة2', 'unit2'] },
@@ -227,6 +229,8 @@
         if ('active' in r && has(r, 'active')) it.active = parseActive(r.active);
         if ('leadOverride' in r) it.leadOverride = blankOrNum(r.leadOverride);
         if ('extraOverride' in r) it.extraOverride = blankOrNum(r.extraOverride);
+        if ('prepDays' in r) it.prepDays = blankOrNum(r.prepDays);
+        if ('shipDays' in r) it.shipDays = blankOrNum(r.shipDays);
         if (has(r, 'refCost')) it.refCost = num(r.refCost);
         if (units.length) {
           for (const u of units) {
@@ -241,7 +245,7 @@
           code: r.code, name: String(r.name || '').trim(), baseUnit: String(r.baseUnit || '').trim(), purchaseUnit: String(r.purchaseUnit || '').trim(), units,
           group: String(r.group || 'غير مصنف').trim(), sub1: String(r.sub1 || '').trim(), sub2: String(r.sub2 || '').trim(), mainItem: String(r.mainItem || '').trim(),
           type: String(r.type || db.settings.defaultType || '').trim(), active: parseActive(r.active),
-          leadOverride: blankOrNum(r.leadOverride), extraOverride: blankOrNum(r.extraOverride), refCost: blankOrNum(r.refCost), notes: String(r.notes || '').trim(),
+          leadOverride: blankOrNum(r.leadOverride), extraOverride: blankOrNum(r.extraOverride), prepDays: blankOrNum(r.prepDays), shipDays: blankOrNum(r.shipDays), refCost: blankOrNum(r.refCost), notes: String(r.notes || '').trim(),
           autoAdded: false, addedAt: new Date().toISOString().slice(0, 10)
         };
         db.items.push(it); idx.set(it.code, db.items.length - 1); added++;

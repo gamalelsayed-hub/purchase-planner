@@ -219,3 +219,13 @@ code { font-family: Consolas, monospace; background: #f1f3f6; padding: 1px 5px; 
 .track-bar .ts.done { background: var(--ok-soft); color: var(--ok); border-color: #b9e2cc; }
 .track-bar .ts.cur { background: var(--brand); color: #fff; border-color: var(--brand); font-weight: 600; }
 .track-bar .ts.cur.late { background: var(--bad); border-color: var(--bad); }
+
+/* فلاتر أوامر الشراء: خانات تحديد متعددة */
+.filters summary { cursor: pointer; display: flex; gap: 8px; align-items: center; }
+.fgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px 16px; margin-top: 6px; }
+.fgroup .fg-h { font-weight: 700; font-size: 12.5px; margin-bottom: 4px; color: var(--ink-2); }
+.fg-chips { display: flex; flex-wrap: wrap; gap: 5px; max-height: 128px; overflow: auto; }
+.fchip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; font-size: 12.5px; cursor: pointer; user-select: none; background: var(--panel); }
+.fchip input { margin: 0; }
+.fchip.on { background: var(--brand-soft); border-color: var(--brand); font-weight: 600; }
+.fchip .small { opacity: .7; }

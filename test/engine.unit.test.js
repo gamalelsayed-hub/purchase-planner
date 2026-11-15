@@ -105,15 +105,33 @@ close(E.compute(db).rows[0].transit, 0, 'PO not counted when setting is off');
 db.settings.poAsTransit = true;
 let rr = E.compute(db).rows;
 close(rr[0].transit, 100, 'A1 transit from PO = 10 cartons'); close(rr[1].transit, 35, 'B1 transit = (40-10) + 5');
-// P1 (خارجي) تلقائيًا: الشحن المتوقع = أول ظهور + 60 يوم تجهيز، والوصول = + 30 يوم شحن
+// الخطة التراكمية من تاريخ الأمر (P1 خارجي، أول ظهور 1/7): مخطط الشحن = +66 يوم (2+2+7+45+7+3)، والمستودع = +113
 let s1 = E.poSummary(db, '2026-07-01').find(o => o.no === 'P1');
-assert.strictEqual(s1.expShip, '2026-08-30'); assert.strictEqual(s1.eta, '2026-09-29'); assert.ok(!s1.shipLate);
-// بعد مدة التجهيز بدون بوليصة ← تنبيه «تأخر الشحن» والحالة تبقى «صادر»
-s1 = E.poSummary(db, '2026-09-05').find(o => o.no === 'P1');
-assert.ok(s1.shipLate); assert.strictEqual(s1.shipLateDays, 6); assert.strictEqual(s1.stage, 'issued');
-// نوع بدون مرحلة شحن (مصنع، 0 يوم) ← بدون تنبيه، والوصول بفترة التوصيل
+assert.strictEqual(s1.expShip, '2026-09-05'); assert.strictEqual(s1.eta, '2026-10-22'); assert.strictEqual(s1.planEta, '2026-10-22');
+assert.ok(!s1.shipLate); assert.strictEqual(s1.mainStatus, 'صادر'); assert.strictEqual(s1.variance, 0);
+let pl = E.poPlan(db, db.po.orders.P1, '2026-07-01');
+assert.strictEqual(pl.stages[7].dayFromPo, 96, 'docs stage = day 96 from PO date (66 + 30)');
+// عدّى موعد الشحن المخطط بدون شحن ← «تأخر الشحن» والحالة تبقى «صادر»
+s1 = E.poSummary(db, '2026-09-10').find(o => o.no === 'P1');
+assert.ok(s1.shipLate); assert.strictEqual(s1.shipLateDays, 5); assert.strictEqual(s1.stage, 'issued');
+// مدة التجهيز في كارت الصنف تغلب: A1 = 60 يوم ← الشحن المخطط +81
+db.items[0].prepDays = 60;
+assert.strictEqual(E.poSummary(db, '2026-07-01').find(o => o.no === 'P1').expShip, '2026-09-20');
+db.items[0].shipDays = 40; // مدة الشحن للصنف ← مرحلة «في الطريق» 40
+assert.strictEqual(E.poPlan(db, db.po.orders.P1, '2026-07-01').stages[7].dayFromPo, 121);
+delete db.items[0].prepDays; delete db.items[0].shipDays;
+// الفعلي يزيح الباقي: الشحن الفعلي 20/9 (متأخر 15 يوم عن المخطط 5/9) ← الوصول يتأخر 15 يوم، والمقارنة تبين الفرق
+E.setTrackStage(db, db.po.orders.P1, 'shipped', { date: '2026-09-20' });
+s1 = E.poSummary(db, '2026-09-20').find(o => o.no === 'P1');
+assert.strictEqual(s1.eta, '2026-11-06'); assert.strictEqual(s1.planEta, '2026-10-22'); assert.strictEqual(s1.variance, 15);
+assert.strictEqual(s1.mainStatus, 'مشحون — بدون أوراق');
+E.setTrackStage(db, db.po.orders.P1, 'docs', { date: '2026-09-25' });
+assert.strictEqual(E.poSummary(db, '2026-09-25').find(o => o.no === 'P1').mainStatus, 'مشحون — استلمنا الأوراق');
+// إرجاع P1 لحالته (باقي الاختبارات تعتمد عليه صادر بدون متابعة)
+delete db.po.orders.P1.track; db.po.orders.P1.shipped = false; db.po.orders.P1.shippedAt = ''; db.po.orders.P1.shippedBy = '';
+// نوع محلي (مصنع) ← بدون مراحل شحن، والوصول بفترة التوصيل
 const s2 = E.poSummary(db, '2026-12-01').find(o => o.no === 'P2');
-assert.strictEqual(s2.expShip, ''); assert.ok(!s2.shipLate); assert.strictEqual(s2.eta, '2026-08-01');
+assert.strictEqual(s2.expShip, ''); assert.ok(!s2.shipLate); assert.strictEqual(s2.eta, '2026-08-01'); assert.ok(!s2.foreign);
 // إعادة الرفع بدون P2 ← P2 وصل المخزون
 pr = I.applyPOs(db, poRows([['P1', 'A1', 'كرتون', 10, 1000, 0], ['P1', 'B1', 'حبه', 40, 200, 10]]), { date: '2026-07-15' });
 assert.deepStrictEqual(pr.closed, ['P2']); assert.strictEqual(db.po.orders.P2.status, 'received');
@@ -135,7 +153,7 @@ assert.strictEqual(db.po.orders.P1.payments.length, 1);
 assert.strictEqual(E.stageOf(db.po.orders.P1), 'shipped'); assert.strictEqual(E.stageOf(db.po.orders.P2), 'issued');
 I.applyPOPay(db, [{ poNo: 'P2', status: 'لم يتم السداد', shipDate: '2026-08-01', blNo: 'BL-77' }], { date: '2026-08-02' });
 const p2 = E.poSummary(db, '2026-08-02').find(o => o.no === 'P2');
-assert.strictEqual(p2.stage, 'shipped'); assert.strictEqual(p2.blNo, 'BL-77'); assert.strictEqual(p2.eta, '2026-08-31', 'ship date + 30 days');
+assert.strictEqual(p2.stage, 'shipped'); assert.strictEqual(p2.blNo, 'BL-77'); assert.strictEqual(p2.eta, '2026-08-01', 'local order: PO date + lead time (no shipping stages)');
 // تاريخ الأمر من الشيت: الأمر الصادر يحسب وصوله من تاريخ الأمر + فترة التوصيل
 db.po.orders.P2.shipped = false; db.po.orders.P2.shipDate = ''; db.po.orders.P2.shippedAt = '';
 I.applyPOPay(db, [{ poNo: 'P2', poDate: '2026-05-01' }], { date: '2026-08-03' });
