@@ -1077,6 +1077,10 @@
         <label class="f">قيمة الأشهر الإضافية<input id="b_extra" type="number" step="any" min="0"></label>
         <label class="f">فترة توصيل خاصة<select id="b_leadMode"><option value="">— بدون تغيير —</option><option value="clear">مسح (حسب النوع)</option><option value="set">تحديد قيمة</option></select></label>
         <label class="f">قيمة فترة التوصيل<input id="b_lead" type="number" step="any" min="0"></label>
+        <label class="f">مدة التجهيز (يوم)<select id="b_prepMode"><option value="">— بدون تغيير —</option><option value="clear">مسح (حسب النوع/المراحل)</option><option value="set">تحديد قيمة</option></select></label>
+        <label class="f">قيمة مدة التجهيز<input id="b_prep" type="number" step="1" min="0"></label>
+        <label class="f">مدة الشحن (يوم)<select id="b_shipMode"><option value="">— بدون تغيير —</option><option value="clear">مسح (حسب النوع/المراحل)</option><option value="set">تحديد قيمة</option></select></label>
+        <label class="f">قيمة مدة الشحن<input id="b_ship" type="number" step="1" min="0"></label>
         <label class="f">التصنيف اليدوي<select id="b_cls"><option value="">— بدون تغيير —</option><option value="auto">إرجاع للتلقائي</option>${db.classes.map(c => `<option value="${c.code}">${c.code}</option>`).join('')}</select></label>
         <label class="chk full"><input type="checkbox" id="b_confirm"> تأكيد التصنيف (إزالة علامة «غير مصنف — جديد»)</label>
       </div><datalist id="dl_bg">${db.groups.map(g => `<option value="${esc(g)}">`).join('')}</datalist>`,
@@ -1090,6 +1094,10 @@
             if (t) it.type = t; if (g) it.group = g; if (a) it.active = a === '1';
             if (em === 'clear') it.extraOverride = null; else if (em === 'set' && ev !== '') it.extraOverride = num(ev);
             if (lm === 'clear') it.leadOverride = null; else if (lm === 'set' && lv !== '') it.leadOverride = num(lv);
+            for (const [mode, val, key] of [['#b_prepMode', '#b_prep', 'prepDays'], ['#b_shipMode', '#b_ship', 'shipDays']]) {
+              const md = m.q(mode).value, vv = m.q(val).value;
+              if (md === 'clear') it[key] = null; else if (md === 'set' && vv !== '') it[key] = num(vv);
+            }
             const bc = m.q('#b_cls').value; if (bc === 'auto') it.clsOverride = ''; else if (bc) it.clsOverride = bc;
             if (conf || t || g) it.autoAdded = false;
           }
