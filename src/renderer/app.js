@@ -1186,7 +1186,7 @@
   // ---------- أوامر الشراء: شاشة موحدة (المتابعة + السداد + المعاملات الخارجية) ----------
   const curName = c => (db.currencies.find(x => x.code === c) || { name: c }).name;
   const ALERTS = ['متأخر في مرحلته', 'متأخر عن الخطة', 'تأخر الشحن', 'مطلوب تلكس', 'غرامة حاويات', 'قربت أيام السماح', 'بدون تاريخ أمر', 'لا يزال في التقرير'];
-  const MF_GROUPS = [['main', 'الحالة'], ['stage', 'المرحلة'], ['fw', 'الوكيل / مكتب الاستيراد'], ['cl', 'المخلّص'], ['sup', 'المورد'], ['pay', 'السداد'], ['cur', 'العملة'], ['shipc', 'قيمة الشحن'], ['alert', 'تنبيهات']];
+  const MF_GROUPS = [['main', 'الحالة'], ['stage', 'المرحلة'], ['fw', 'الوكيل / مكتب الاستيراد'], ['cl', 'المخلّص'], ['sup', 'المورد'], ['pay', 'السداد'], ['cur', 'العملة'], ['shipc', 'قيمة الشحن'], ['pod', 'تاريخ الأمر'], ['alert', 'تنبيهات']];
   const mfState = () => { const f = ui.f.m || (ui.f.m = { main: ['بانتظار الاعتماد', 'صادر', 'مشحون — بدون أوراق', 'مشحون — استلمنا الأوراق'], stage: [], fw: [], cl: [], sup: [], pay: [], cur: [], alert: [], q: '' }); MF_GROUPS.forEach(([g]) => { if (!Array.isArray(f[g])) f[g] = []; }); return f; };
   // كل الأوامر بكل المعلومات (السداد + المتابعة + الخطة) في سطر واحد
   function masterAll() {
@@ -1210,7 +1210,7 @@
     });
   }
   const mfValue = (g, o) => g === 'main' ? [o.mainStatus] : g === 'stage' ? [o.stageName || '— محلي (بدون مراحل) —'] : g === 'fw' ? [o.forwarder || '— بدون —'] : g === 'cl' ? [o.clearer || '— بدون —'] :
-    g === 'sup' ? [o.supplier || '— بدون —'] : g === 'pay' ? [o.payStatus] : g === 'cur' ? [curName(o.currency)] : g === 'shipc' ? [num(o.shipping) > 0 ? 'الشحن مسجّل' : 'الشحن فارغ'] : g === 'alert' ? o.alerts : [];
+    g === 'sup' ? [o.supplier || '— بدون —'] : g === 'pay' ? [o.payStatus] : g === 'cur' ? [curName(o.currency)] : g === 'shipc' ? [num(o.shipping) > 0 ? 'الشحن مسجّل' : 'الشحن فارغ'] : g === 'pod' ? [o.poDate ? 'تاريخ الأمر موجود' : 'تاريخ الأمر فارغ'] : g === 'alert' ? o.alerts : [];
   function masterRows(except) {
     const f = mfState(), q = (f.q || '').trim().toLowerCase();
     return masterAll().filter(o => {
@@ -1227,7 +1227,7 @@
     const groups = MF_GROUPS.map(([g, label]) => {
       const base = masterRows(g);
       const counts = new Map(); base.forEach(o => mfValue(g, o).forEach(v => counts.set(v, (counts.get(v) || 0) + 1)));
-      let vals = g === 'main' ? E.MAIN_STATUSES.slice() : g === 'alert' ? ALERTS.slice() : g === 'stage' ? (db.shipStages || []).map(s => s.name).concat(['— محلي (بدون مراحل) —']) : g === 'pay' ? ['غير مسدد', 'مسدد جزئيًا', 'مسدد', 'غير محدد'] : g === 'shipc' ? ['الشحن مسجّل', 'الشحن فارغ'] : [...new Set(masterAll().flatMap(o => mfValue(g, o)))].sort();
+      let vals = g === 'main' ? E.MAIN_STATUSES.slice() : g === 'alert' ? ALERTS.slice() : g === 'stage' ? (db.shipStages || []).map(s => s.name).concat(['— محلي (بدون مراحل) —']) : g === 'pay' ? ['غير مسدد', 'مسدد جزئيًا', 'مسدد', 'غير محدد'] : g === 'shipc' ? ['الشحن مسجّل', 'الشحن فارغ'] : g === 'pod' ? ['تاريخ الأمر موجود', 'تاريخ الأمر فارغ'] : [...new Set(masterAll().flatMap(o => mfValue(g, o)))].sort();
       vals = vals.filter(v => counts.get(v) || f[g].includes(v));
       if (!vals.length) return '';
       return `<div class="fgroup"><div class="fg-h">${label}${f[g].length ? ` <button class="link" data-act="fclear" data-g="${g}">مسح</button>` : ''}</div><div class="fg-chips">${vals.map(v => `<label class="fchip ${f[g].includes(v) ? 'on' : ''}"><input type="checkbox" data-fchip="${g}" data-v="${esc(v)}" ${f[g].includes(v) ? 'checked' : ''}> ${esc(v)} <span class="small">${fmt(counts.get(v) || 0)}</span></label>`).join('')}</div></div>`;
