@@ -488,11 +488,21 @@
   }
   // مدة المرحلة لهذا الأمر: «تجهيز البضاعة» و«في الطريق» من كارت الصنف أولًا، ثم نوع الصنف، ثم إعداد المرحلة.
   // الأمر اللي فيه أكثر من صنف ياخذ الأطول.
+  // فهارس الأصناف والأنواع (تُبنى مرة وحدة لكل عملية حساب بدل كل أمر وكل مرحلة)
+  let _maps = null;
+  function lookupMaps(db) {
+    const now = Date.now();
+    if (!_maps || _maps.db !== db || _maps.items !== db.items || _maps.n !== (db.items || []).length || now - _maps.at > 1500) {
+      _maps = { db, items: db.items, n: (db.items || []).length, at: now };
+      _maps.items = db.items; _maps.itemMap = new Map((db.items || []).map(it => [it.code, it])); _maps.typeMap = new Map((db.types || []).map(t => [t.name, t]));
+    }
+    return { items: _maps.itemMap, types: _maps.typeMap };
+  }
   function stageDur(db, o, stage) {
     const role = stage.id === 'prep' ? 'prepDays' : stage.marks === 'shipped' ? 'shipDays' : '';
     const def = num(stage.days);
     if (!role) return def;
-    const items = new Map((db.items || []).map(it => [it.code, it])), types = new Map((db.types || []).map(t => [t.name, t]));
+    const { items, types } = lookupMaps(db);
     let best = null;
     for (const l of o.lines || []) {
       const it = items.get(l.code); if (!it) continue;

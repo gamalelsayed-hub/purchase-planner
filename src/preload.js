@@ -27,5 +27,6 @@ contextBridge.exposeInMainWorld('api', {
   attachOpen: (no, file) => ipcRenderer.invoke('attach:open', no, file),
   attachRemove: (no, file) => ipcRenderer.invoke('attach:remove', no, file),
   attachFolder: (no) => ipcRenderer.invoke('attach:folder', no),
-  openFolder: (which) => ipcRenderer.invoke('app:openFolder', which)
+  openFolder: (which) => ipcRenderer.invoke('app:openFolder', which),
+  onFlush: (cb) => ipcRenderer.on('app:flush', async () => { try { await cb(); } finally { ipcRenderer.send('app:flushed'); } })
 });

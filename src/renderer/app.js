@@ -149,7 +149,7 @@
   let saveTimer = null;
   function scheduleSave() {
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveNow, 400);
+    saveTimer = setTimeout(saveNow, 1200);
   }
   let dirty = false;
   function scheduleSaveMark() { dirty = true; }
@@ -339,7 +339,13 @@
         <div class="small" style="opacity:.7">نسخة رقم ${ui.cfg ? (String(ui.cfg.version).split('.').pop() === '0' ? 'تطوير' : String(ui.cfg.version).split('.').pop()) : ''}</div></div>`;
   }
 
-  function render() {
+  // ذاكرة مؤقتة أثناء رسم الشاشة: حساب أوامر الشراء مرة وحدة بدل كل جدول وكل فلتر
+  let MEMO = null;
+  const memo = (k, f) => MEMO ? (k in MEMO ? MEMO[k] : (MEMO[k] = f())) : f();
+  const poSum = () => memo('po', () => E.poSummary(db, today()));
+  const trackSum = () => memo('track', () => E.trackSummary(db, today()));
+  function render() { MEMO = {}; try { renderInner(); } finally { MEMO = null; } }
+  function renderInner() {
     const ae = document.activeElement;
     const focusId = ae && ae.id && $('#main').contains(ae) ? ae.id : null;
     const selStart = focusId && ae.selectionStart != null ? ae.selectionStart : null;
@@ -477,6 +483,7 @@
     ui.mtime = r.mtime; dirty = false;
     recompute(); render();
   }
+  if (api.onFlush) api.onFlush(() => saveNow());
   // في وضع العرض: متابعة تغييرات الملف المشترك ومحاولة أخذ القفل
   setInterval(async () => {
     if (!ui.user || !ui.readOnly) return;
@@ -1186,12 +1193,13 @@
   // ---------- أوامر الشراء: شاشة موحدة (المتابعة + السداد + المعاملات الخارجية) ----------
   const curName = c => (db.currencies.find(x => x.code === c) || { name: c }).name;
   const ALERTS = ['متأخر في مرحلته', 'متأخر عن الخطة', 'تأخر الشحن', 'مطلوب تلكس', 'غرامة حاويات', 'قربت أيام السماح', 'بدون تاريخ أمر', 'لا يزال في التقرير'];
-  const MF_GROUPS = [['main', 'الحالة'], ['stage', 'المرحلة'], ['fw', 'الوكيل / مكتب الاستيراد'], ['cl', 'المخلّص'], ['sup', 'المورد'], ['pay', 'السداد'], ['cur', 'العملة'], ['shipc', 'قيمة الشحن'], ['pod', 'تاريخ الأمر'], ['alert', 'تنبيهات']];
+  const MF_GROUPS = [['main', 'الحالة'], ['stage', 'المرحلة'], ['fw', 'الوكيل / مكتب الاستيراد'], ['cl', 'المخلّص'], ['sup', 'المورد'], ['pay', 'السداد'], ['cur', 'العملة'], ['shipc', 'قيمة الشحن'], ['pod', 'تاريخ الأمر'], ['bl', 'رقم البوليصة'], ['alert', 'تنبيهات']];
   const mfState = () => { const f = ui.f.m || (ui.f.m = { main: ['بانتظار الاعتماد', 'صادر', 'مشحون — بدون أوراق', 'مشحون — استلمنا الأوراق'], stage: [], fw: [], cl: [], sup: [], pay: [], cur: [], alert: [], q: '' }); MF_GROUPS.forEach(([g]) => { if (!Array.isArray(f[g])) f[g] = []; }); return f; };
   // كل الأوامر بكل المعلومات (السداد + المتابعة + الخطة) في سطر واحد
-  function masterAll() {
-    const ts = new Map(E.trackSummary(db, today()).map(t => [t.no, t]));
-    return E.poSummary(db, today()).map(o => {
+  function masterAll() { return memo('master', masterAllRaw); }
+  function masterAllRaw() {
+    const ts = new Map(trackSum().map(t => [t.no, t]));
+    return poSum().map(o => {
       const t = ts.get(o.no) || {}, po = db.po.orders[o.no];
       const alerts = [];
       if (t.late && o.foreign && o.status === 'open') alerts.push('متأخر في مرحلته');
@@ -1210,7 +1218,7 @@
     });
   }
   const mfValue = (g, o) => g === 'main' ? [o.mainStatus] : g === 'stage' ? [o.stageName || '— محلي (بدون مراحل) —'] : g === 'fw' ? [o.forwarder || '— بدون —'] : g === 'cl' ? [o.clearer || '— بدون —'] :
-    g === 'sup' ? [o.supplier || '— بدون —'] : g === 'pay' ? [o.payStatus] : g === 'cur' ? [curName(o.currency)] : g === 'shipc' ? [num(o.shipping) > 0 ? 'الشحن مسجّل' : 'الشحن فارغ'] : g === 'pod' ? [o.poDate ? 'تاريخ الأمر موجود' : 'تاريخ الأمر فارغ'] : g === 'alert' ? o.alerts : [];
+    g === 'sup' ? [o.supplier || '— بدون —'] : g === 'pay' ? [o.payStatus] : g === 'cur' ? [curName(o.currency)] : g === 'shipc' ? [num(o.shipping) > 0 ? 'الشحن مسجّل' : 'الشحن فارغ'] : g === 'pod' ? [o.poDate ? 'تاريخ الأمر موجود' : 'تاريخ الأمر فارغ'] : g === 'bl' ? [String(o.blNo || '').trim() ? 'البوليصة موجودة' : 'البوليصة فارغة'] : g === 'alert' ? o.alerts : [];
   function masterRows(except) {
     const f = mfState(), q = (f.q || '').trim().toLowerCase();
     return masterAll().filter(o => {
@@ -1227,7 +1235,7 @@
     const groups = MF_GROUPS.map(([g, label]) => {
       const base = masterRows(g);
       const counts = new Map(); base.forEach(o => mfValue(g, o).forEach(v => counts.set(v, (counts.get(v) || 0) + 1)));
-      let vals = g === 'main' ? E.MAIN_STATUSES.slice() : g === 'alert' ? ALERTS.slice() : g === 'stage' ? (db.shipStages || []).map(s => s.name).concat(['— محلي (بدون مراحل) —']) : g === 'pay' ? ['غير مسدد', 'مسدد جزئيًا', 'مسدد', 'غير محدد'] : g === 'shipc' ? ['الشحن مسجّل', 'الشحن فارغ'] : g === 'pod' ? ['تاريخ الأمر موجود', 'تاريخ الأمر فارغ'] : [...new Set(masterAll().flatMap(o => mfValue(g, o)))].sort();
+      let vals = g === 'main' ? E.MAIN_STATUSES.slice() : g === 'alert' ? ALERTS.slice() : g === 'stage' ? (db.shipStages || []).map(s => s.name).concat(['— محلي (بدون مراحل) —']) : g === 'pay' ? ['غير مسدد', 'مسدد جزئيًا', 'مسدد', 'غير محدد'] : g === 'shipc' ? ['الشحن مسجّل', 'الشحن فارغ'] : g === 'pod' ? ['تاريخ الأمر موجود', 'تاريخ الأمر فارغ'] : g === 'bl' ? ['البوليصة موجودة', 'البوليصة فارغة'] : [...new Set(masterAll().flatMap(o => mfValue(g, o)))].sort();
       vals = vals.filter(v => counts.get(v) || f[g].includes(v));
       if (!vals.length) return '';
       return `<div class="fgroup"><div class="fg-h">${label}${f[g].length ? ` <button class="link" data-act="fclear" data-g="${g}">مسح</button>` : ''}</div><div class="fg-chips">${vals.map(v => `<label class="fchip ${f[g].includes(v) ? 'on' : ''}"><input type="checkbox" data-fchip="${g}" data-v="${esc(v)}" ${f[g].includes(v) ? 'checked' : ''}> ${esc(v)} <span class="small">${fmt(counts.get(v) || 0)}</span></label>`).join('')}</div></div>`;
@@ -1273,7 +1281,7 @@
   const etaCell = o => !o.eta ? '<span class="muted">—</span>' : `${esc(o.eta)}${o.etaManual ? ' ✎' : ''}${o.status === 'open' && o.daysToEta != null ? ` <span class="pill ${o.daysToEta < 0 ? 'bad' : o.daysToEta <= 30 ? 'warn' : ''}">${o.daysToEta < 0 ? 'متأخر ' + (-o.daysToEta) + ' يوم' : 'بعد ' + o.daysToEta + ' يوم'}</span>` : ''}`;
   function cashBanner() {
     const H = num(db.settings.cashHorizonDays) || 60;
-    const open = E.poSummary(db, today()).filter(o => o.status === 'open' && !o.pending && o.dueSar > 0.5);
+    const open = poSum().filter(o => o.status === 'open' && !o.pending && o.dueSar > 0.5);
     if (!open.length) return '';
     const over = open.filter(o => o.daysToEta != null && o.daysToEta < 0), soon = open.filter(o => o.daysToEta != null && o.daysToEta >= 0 && o.daysToEta <= H);
     const sum = a => a.reduce((x, o) => x + o.dueSar, 0);
@@ -1482,7 +1490,7 @@
   }
   function poModal(no) {
     const o = db.po.orders[no]; if (!o) return;
-    const sm = E.poSummary(db, today()).find(x => x.no === no);
+    const sm = poSum().find(x => x.no === no);
     const canPay = can('po_payments'), canSt = can('po_import') || can('po_payments');
     const dis = c => c ? '' : 'disabled';
     const auto = E.poAutoEta(db, o);
@@ -1580,7 +1588,7 @@
         const pa = m.q('#p_add');
         if (pa) pa.onclick = () => { const a = num(m.q('#p_amt').value); if (!(a > 0)) return toast('أدخل المبلغ', 'bad'); save(); add(a, m.q('#p_kind').value, m.q('#p_cur').value, m.q('#p_note').value.trim(), m.q('#p_date').value || today()); reopenModal(); };
         const pf = m.q('#p_full');
-        if (pf) pf.onclick = () => { save(); const x = E.poSummary(db, today()).find(y => y.no === no); if (!(x.dueSar > 0.5)) return toast('لا يوجد متبقي'); add(+(x.dueSar / x.rate).toFixed(2), 'سداد كامل', o.currency, m.q('#p_note').value.trim(), m.q('#p_date').value || today()); reopenModal(); };
+        if (pf) pf.onclick = () => { save(); const x = poSum().find(y => y.no === no); if (!(x.dueSar > 0.5)) return toast('لا يوجد متبقي'); add(+(x.dueSar / x.rate).toFixed(2), 'سداد كامل', o.currency, m.q('#p_note').value.trim(), m.q('#p_date').value || today()); reopenModal(); };
         const xa = m.q('#x_add');
         if (xa) xa.onclick = () => {
           const a = num(m.q('#x_amt').value), d = m.q('#x_desc').value.trim();
@@ -1623,7 +1631,7 @@
   const trackPill = t => (t.needTelex ? '<span class="pill bad" title="المخلّص ينتظر التلكس منّا">⚠ مطلوب تلكس</span> ' : '') + `<span class="pill ${t.closed ? 'ok' : t.late ? 'bad' : t.group === 'عند المورد' ? 'brand' : 'warn'}" title="${esc(t.party)}">${esc(t.stageName)}</span>`;
   const demCell = t => !t.containers.length ? '' : t.demurrageOverdue ? `<span class="pill bad">غرامة! متأخر ${-t.demurrageLeft} يوم</span>` : t.demurrageSoon ? `<span class="pill warn">باقي ${t.demurrageLeft} يوم</span>` : t.containersOpen ? (t.demurrageLeft != null ? `<span class="pill">باقي ${t.demurrageLeft} يوم</span>` : '<span class="small">لم تصل الميناء</span>') : '<span class="pill ok">سُلّمت كلها</span>';
   function demurrageBanner() {
-    const ts = E.trackSummary(db, today()).filter(t => !t.closed);
+    const ts = trackSum().filter(t => !t.closed);
     const over = ts.reduce((a, t) => a + t.containers.filter(c => c.overdue).length, 0), soon = ts.reduce((a, t) => a + t.containers.filter(c => c.soon).length, 0);
     if (!over && !soon) return '';
     return `<div class="banner ${over ? 'bad' : 'warn'} no-print"><span class="grow">🚛 حاويات: ${over ? `<b>${over}</b> تجاوزت أيام السماح (غرامة) ` : ''}${soon ? `<b>${soon}</b> قربت تنتهي أيام سماحها` : ''} — سلّمها فارغة للوكيل</span>${canSee('po') ? `<button class="sm" data-act="fonly" data-g="alert" data-v="${over ? 'غرامة حاويات' : 'قربت أيام السماح'}">عرض</button>` : ''}</div>`;
@@ -1722,7 +1730,7 @@
         <td><input class="inp" style="width:70px" type="number" step="1" min="0" data-chg="stg" data-i="${i}" data-k="days" value="${esc(s.days)}">${s.id === 'prep' ? ' <span class="small" title="تغلبها مدة التجهيز في كارت الصنف أو نوعه">*صنف</span>' : s.marks === 'shipped' ? ' <span class="small" title="تغلبها مدة الشحن في كارت الصنف أو نوعه">*صنف</span>' : ''}</td>
         <td class="n">+${fmt(st.slice(0, i).reduce((a, x) => a + num(x.days), 0))}</td>
         <td><select class="inp" data-chg="stg" data-i="${i}" data-k="marks">${marks.map(([k, l]) => `<option value="${k}" ${s.marks === k ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
-        <td class="n">${fmt(E.trackSummary(db, today()).filter(t => t.stageId === s.id && !t.closed).length)}</td>
+        <td class="n">${fmt(trackSum().filter(t => t.stageId === s.id && !t.closed).length)}</td>
         <td><button class="sm" data-act="stgMove" data-i="${i}" data-d="-1" ${i ? '' : 'disabled'}>▲</button> <button class="sm" data-act="stgMove" data-i="${i}" data-d="1" ${i < st.length - 1 ? '' : 'disabled'}>▼</button> <button class="sm danger" data-act="stgDel" data-i="${i}">حذف</button></td></tr>`).join('')}
       </tbody></table></div>
       <div class="row-flex" style="margin-top:8px"><button class="sm" data-act="stgAdd">+ إضافة مرحلة</button><button class="sm" data-act="stgReset">استرجاع المراحل الافتراضية</button></div>
@@ -1871,7 +1879,7 @@
           if (payall && !await confirmBox(`تسجيل سداد المتبقي بالكامل لـ ${fmt(nos.length)} أمر؟`, { ok: 'تسجيل السداد' })) return;
           await saveNow(); await api.snapshot('before-bulk-po');
           let changed = 0;
-          const sum = new Map(E.poSummary(db, today()).map(x => [x.no, x]));
+          const sum = new Map(poSum().map(x => [x.no, x]));
           for (const no of nos) {
             const o = db.po.orders[no]; let ch = false;
             if (cS) {
@@ -2278,7 +2286,7 @@
   // النموذج الموحد للمخلّصين: معبّأ بمعاملاتنا (للمخلّص المختار أو الكل) + قوائم منسدلة إلزامية من ورقة «القوائم»
   function trackTemplateSpec(partyId) {
     const F = db.clearerForm || I.defaultClearerForm();
-    const ts = E.trackSummary(db, today()).filter(t => !t.closed && (t.foreign || db.po.orders[t.no].track) && (!partyId || (db.po.orders[t.no].track || {}).clearer === partyId || !(db.po.orders[t.no].track || {}).clearer && t.stageIdx >= (db.shipStages || []).findIndex(s => s.marks === 'shipped')));
+    const ts = trackSum().filter(t => !t.closed && (t.foreign || db.po.orders[t.no].track) && (!partyId || (db.po.orders[t.no].track || {}).clearer === partyId || !(db.po.orders[t.no].track || {}).clearer && t.stageIdx >= (db.shipStages || []).findIndex(s => s.marks === 'shipped')));
     const rows = [];
     for (const t of ts) {
       const o = db.po.orders[t.no], tr = o.track || {}, ci = tr.clearerInfo || {};
@@ -2483,7 +2491,7 @@
     stgMove: el => { const i = +el.dataset.i, j = i + +el.dataset.d; const a = db.shipStages; [a[i], a[j]] = [a[j], a[i]]; commit(); },
     stgDel: async el => {
       const x = db.shipStages[+el.dataset.i];
-      const n = E.trackSummary(db, today()).filter(t => t.stageId === x.id && !t.closed).length;
+      const n = trackSum().filter(t => t.stageId === x.id && !t.closed).length;
       if (!await confirmBox(`حذف المرحلة «${esc(x.name)}»؟${n ? ` فيها ${n} أمر حاليًا وبترجع لمرحلة ضمنية.` : ''}`, { ok: 'حذف', danger: true })) return;
       db.shipStages.splice(+el.dataset.i, 1); Object.values(db.po.orders).forEach(o => { if (o.track && o.track.stage === x.id) o.track.stage = ''; }); commit();
     },
@@ -2521,7 +2529,7 @@
       o.status = 'received'; o.receivedAt = today(); o.receivedBy = 'manual'; o.receivedNote = 'يدوي — ' + ui.user.name; log('أمر الشراء ' + no + ' وصل المخزون (يدوي)'); ui.keepScroll = true; commit();
     },
     poQuickPay: el => {
-      const no = el.dataset.k, o = db.po.orders[no], sm = E.poSummary(db, today()).find(x => x.no === no);
+      const no = el.dataset.k, o = db.po.orders[no], sm = poSum().find(x => x.no === no);
       modal({
         title: `سداد أمر الشراء ${esc(no)}`, size: 'narrow',
         body: `<p>المتبقي: <b>${fmt(sm.dueSar / sm.rate, 2)} ${esc(curName(o.currency))}</b> (${money(sm.dueSar)} ${cur()})</p><div class="form" style="grid-template-columns:1fr">

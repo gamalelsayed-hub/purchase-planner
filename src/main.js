@@ -77,6 +77,16 @@ function createWindow() {
   ]);
   Menu.setApplicationMenu(menu);
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  // قبل الإغلاق: نطلب من الواجهة تحفظ آخر تعديل (الحفظ مؤجَّل ثانية عشان ما يكتب الملف مع كل ضغطة)
+  let allowClose = false;
+  win.on('close', e => {
+    if (allowClose || win.webContents.isCrashed()) return;
+    e.preventDefault();
+    const done = () => { if (allowClose) return; allowClose = true; if (!win.isDestroyed()) win.close(); };
+    ipcMain.once('app:flushed', done);
+    setTimeout(done, 4000);
+    win.webContents.send('app:flush');
+  });
 }
 
 app.whenReady().then(() => {
@@ -134,8 +144,8 @@ ipcMain.handle('db:save', async (_e, json, opts = {}) => {
     if (lastMtime && m && Math.abs(m - lastMtime) > 1) return { ok: false, reason: 'changed' };
   }
   const tmp = dataFile() + '.tmp';
-  fs.writeFileSync(tmp, json, 'utf8');
-  fs.renameSync(tmp, dataFile());
+  await fs.promises.writeFile(tmp, json, 'utf8');
+  await fs.promises.rename(tmp, dataFile());
   lastMtime = mtime(dataFile());
   return { ok: true, mtime: lastMtime };
 });
