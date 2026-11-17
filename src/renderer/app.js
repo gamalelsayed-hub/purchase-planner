@@ -22,15 +22,15 @@
   ];
   // الأقسام (الشاشات) اللي تظهر للمستخدم
   const SECTIONS = [
-    ['dashboard', 'لوحة الطلب'], ['cycle', 'دورة الشراء الشهري'], ['order', 'قائمة الطلب'], ['calc', 'الحساب التفصيلي'], ['checks', 'الفحوصات'],
+    ['dashboard', 'لوحة الطلب'], ['inputs', 'قائمة المدخلات'], ['cycle', 'دورة الشراء الشهري'], ['order', 'قائمة الطلب'], ['calc', 'الحساب التفصيلي'], ['checks', 'الفحوصات'],
     ['items', 'الأصناف'], ['data', 'المبيعات والمخزون'], ['po', 'أوامر الشراء والشحن'], ['archive', 'الأرشيف'], ['settings', 'الإعدادات'], ['users', 'المستخدمين']
   ];
   // كل صلاحية تحتاج قسمها يكون ظاهر
   const PERM_SECTIONS = { shipping: ['po'], import_data: ['cycle', 'data'], items: ['items'], adjust: ['order'], approve: ['order', 'cycle'], po_import: ['po'], po_payments: ['po'], settings: ['settings'], users: ['users'], data_admin: ['settings'] };
   const ROLE_TEMPLATES = {
     admin: { label: 'مدير', perms: PERMS.map(p => p[0]), pages: SECTIONS.map(x => x[0]) },
-    purchasing: { label: 'مشتريات', perms: ['export', 'import_data', 'items', 'adjust', 'po_import', 'shipping'], pages: ['dashboard', 'cycle', 'order', 'calc', 'checks', 'items', 'data', 'po', 'archive'] },
-    ap: { label: 'محاسب موردين', perms: ['export', 'po_import', 'po_payments'], pages: ['po'] },
+    purchasing: { label: 'مشتريات', perms: ['export', 'import_data', 'items', 'adjust', 'po_import', 'shipping'], pages: ['dashboard', 'inputs', 'cycle', 'order', 'calc', 'checks', 'items', 'data', 'po', 'archive'] },
+    ap: { label: 'محاسب موردين', perms: ['export', 'po_import', 'po_payments'], pages: ['inputs', 'po'] },
     viewer: { label: 'مشاهد', perms: ['export'], pages: ['dashboard', 'order', 'po', 'archive'] }
   };
   const withRequired = (pages, perms) => [...new Set(pages.concat(...perms.map(p => PERM_SECTIONS[p] || [])))];
@@ -42,7 +42,7 @@
     if (t && t.perms.slice().sort().join(',') === perms.slice().sort().join(',')) return t.pages.slice();
     return withRequired(SECTIONS.map(x => x[0]).filter(k => k !== 'settings' && k !== 'users'), perms);
   }
-  const canSee = page => !!ui.user && (page === 'inputs' ? (ui.user.pages || []).length > 0 : (ui.user.pages || []).includes(page));
+  const canSee = page => !!ui.user && (ui.user.pages || []).includes(page);
   const ROLES = Object.fromEntries(Object.entries(ROLE_TEMPLATES).map(([k, v]) => [k, v.label]));
   const userPerms = u => Array.isArray(u.perms) ? u.perms : ((ROLE_TEMPLATES[u.role] || ROLE_TEMPLATES.viewer).perms);
   function roleLabel(u) {
@@ -204,6 +204,11 @@
       const ds = d.shipStages.find(x => x.id === 'docs'); if (ds && !ds.marks) ds.marks = 'docs';
       for (const u of d.users) if (Array.isArray(u.pages)) { if (u.pages.includes('ship') && !u.pages.includes('po')) u.pages.push('po'); u.pages = u.pages.filter(x => x !== 'ship'); }
       d.meta.planV = 1;
+    }
+    // «قائمة المدخلات» صارت قسم يتحدد للمستخدم — كل من كان يشوفها يبقى يشوفها
+    if ((d.meta.inputsV || 0) < 1) {
+      for (const u of d.users) if (Array.isArray(u.pages) && u.pages.length && !u.pages.includes('inputs')) u.pages.push('inputs');
+      d.meta.inputsV = 1;
     }
     for (const it of d.items) { if (!Array.isArray(it.units)) it.units = []; }
     return d;
@@ -573,6 +578,7 @@
         { k: 'username', h: 'اسم المستخدم' }, { k: 'name', h: 'الاسم' }, { k: 'role', h: 'الدور', v: u => roleLabel(u) },
         { k: 'pages', h: 'الأقسام', cls: 'wrap', v: u => userPages(u).map(p => (SECTIONS.find(x => x[0] === p) || [p, p])[1]).join('، ') },
         { k: 'perms', h: 'الصلاحيات', cls: 'wrap', v: u => userPerms(u).map(p => (PERMS.find(x => x[0] === p) || [p, p])[1]).join('، ') },
+        { k: 'oview', h: 'طلب الشراء', cls: 'wrap', v: u => [(u.orderTypes || []).length ? 'أنواع: ' + u.orderTypes.join('، ') : '', (u.orderHide || []).length ? 'مخفي: ' + u.orderHide.map(k => (ORDER_HIDEABLE.find(x => x[0] === k) || [k, k])[1]).join('، ') : ''].filter(Boolean).join(' — ') || 'الكل' },
         { k: 'active', h: 'الحالة', v: u => u.active !== false ? 'نشط' : 'موقوف' }, { k: 'createdAt', h: 'تاريخ الإنشاء', v: u => (u.createdAt || '').slice(0, 10) },
         { k: 'act', h: '', nosort: true, f: u => `<button class="sm" data-act="editUser" data-k="${esc(u.username)}">تعديل</button>` }
       ], db.users, { short: true })}
@@ -597,7 +603,12 @@
       <div class="perm-grid sec-grid">${SECTIONS.map(([k, l]) => `<label class="chk"><input type="checkbox" data-page="${k}" ${curPages.includes(k) ? 'checked' : ''}> ${l}</label>`).join('')}</div>
       <h3>الصلاحيات <span class="small">(وش يقدر يعدّل داخل أقسامه — كل صلاحية تعلّم قسمها تلقائيًا)</span></h3>
       <div class="perm-grid">${PERMS.map(([k, l]) => `<label class="chk"><input type="checkbox" data-perm="${k}" ${cur.includes(k) ? 'checked' : ''}> ${l}</label>`).join('')}</div>
-      <div class="small" id="u_rolelbl" style="margin-top:8px"></div>`,
+      <div class="small" id="u_rolelbl" style="margin-top:8px"></div>
+      <h3>طلب الشراء: وش يشوف <span class="small">(لوحة الطلب، قائمة الطلب، الحساب التفصيلي، الأرشيف، والتصدير والطباعة)</span></h3>
+      <div class="small" style="margin-bottom:4px"><b>الأنواع</b> — اللي مو معلّم ما يظهر له (ولا وحدة معلّمة = كل الأنواع)</div>
+      <div class="perm-grid sec-grid">${db.types.map(t => `<label class="chk"><input type="checkbox" data-otype="${esc(t.name)}" ${(u && u.orderTypes || []).includes(t.name) ? 'checked' : ''}> ${esc(t.name)}</label>`).join('')}</div>
+      <div class="small" style="margin:8px 0 4px"><b>الأعمدة الظاهرة في قائمة الطلب</b> — شيل العلامة عن العمود اللي ما تبيه يشوفه (القيمة أو التكلفة تخفي كل المبالغ)</div>
+      <div class="perm-grid sec-grid">${ORDER_HIDEABLE.map(([k, l]) => `<label class="chk"><input type="checkbox" data-ocol="${k}" ${(u && u.orderHide || []).includes(k) ? '' : 'checked'}> ${l}</label>`).join('')}</div>`,
       foot: `<button class="primary" data-ok>حفظ</button><button data-close>إلغاء</button>`,
       onMount: m => {
         const perms = () => [...m.qa('[data-perm]')].filter(x => x.checked).map(x => x.dataset.perm);
@@ -617,12 +628,13 @@
         m.q('#u_tpl').onchange = e => { const t = ROLE_TEMPLATES[e.target.value]; if (!t) return; m.qa('[data-perm]').forEach(x => { x.checked = t.perms.includes(x.dataset.perm); }); m.qa('[data-page]').forEach(x => { x.checked = t.pages.includes(x.dataset.page); }); syncPages(); lbl(); };
         m.q('[data-ok]').onclick = async () => {
           const pw = m.q('#u_pw').value, name = m.q('#u_name').value.trim(), ps = perms();
+          const oTypes = [...m.qa('[data-otype]')].filter(x => x.checked).map(x => x.dataset.otype), oHide = [...m.qa('[data-ocol]')].filter(x => !x.checked).map(x => x.dataset.ocol);
           const role = (Object.entries(ROLE_TEMPLATES).find(([, t]) => t.perms.slice().sort().join(',') === ps.slice().sort().join(',')) || ['custom'])[0];
           const others = db.users.filter(x => x !== u && x.active !== false && userPerms(x).includes('users'));
           if (u) {
             const act = m.q('#u_active').checked;
             if (!others.length && (!act || !ps.includes('users'))) return toast('لازم يبقى مستخدم نشط واحد على الأقل عنده صلاحية «إدارة المستخدمين»', 'bad');
-            u.role = role; u.perms = ps; u.pages = withRequired(pages(), ps); u.name = name || u.username; u.active = act;
+            u.role = role; u.perms = ps; u.pages = withRequired(pages(), ps); u.name = name || u.username; u.active = act; u.orderTypes = oTypes; u.orderHide = oHide;
             if (pw) { if (pw.length < 4) return toast('كلمة المرور قصيرة', 'bad'); u.salt = hex(crypto.getRandomValues(new Uint8Array(16))); u.hash = await hashPw(pw, u.salt); }
             if (u.username === ui.user.username) { ui.user.perms = ps.slice(); ui.user.pages = u.pages.slice(); }
             log('تعديل المستخدم ' + u.username + ' (' + roleLabel(u) + ')');
@@ -632,7 +644,7 @@
             if (db.users.some(x => x.username === un)) return toast('اسم المستخدم موجود', 'bad');
             if (pw.length < 4) return toast('كلمة المرور قصيرة (4 أحرف على الأقل)', 'bad');
             const nu = await makeUser(un, name, role === 'custom' ? 'viewer' : role, pw);
-            nu.role = role; nu.perms = ps; nu.pages = withRequired(pages(), ps);
+            nu.role = role; nu.perms = ps; nu.pages = withRequired(pages(), ps); nu.orderTypes = oTypes; nu.orderHide = oHide;
             db.users.push(nu);
             log('إضافة المستخدم ' + un + ' (' + roleLabel(nu) + ')');
           }
@@ -679,13 +691,14 @@
 
   // ---------- لوحة الطلب ----------
   PAGES.dashboard = function () {
-    const s = db.settings, t = res.totals;
+    const s = db.settings, V = myView(), A = V.restricted ? myAgg() : res, t = A.totals;
     const auto = res.rows.filter(r => r.autoAdded).length;
     const excApplied = res.rows.filter(r => r.excMonths > 0).length;
     const ratio = t.maxValue ? (t.stockValue + t.transitValue) / t.maxValue : 0;
-    const typeRows = res.byType;
-    const clsRows = db.classes.map(c => Object.assign({ key: c.code, service: c.service }, res.byClass.find(x => x.key === c.code) || { items: 0, ordered: 0, orderValue: 0 }));
-    const grpRows = res.byGroup.sort((a, b) => b.orderValue - a.orderValue);
+    const typeRows = A.byType;
+    const clsRows = db.classes.map(c => Object.assign({ key: c.code, service: c.service }, A.byClass.find(x => x.key === c.code) || { items: 0, ordered: 0, orderValue: 0 }));
+    const grpRows = A.byGroup.sort((a, b) => b.orderValue - a.orderValue);
+    const mc = cols => V.money ? cols : cols.filter(c => !/Value$/.test(c.k));
     const archived = db.archive.find(a => a.orderMonth === res.orderMonth);
     return `
     <div class="page-head"><div><h1>لوحة طلب المشتريات — ${monthLabel(res.orderMonth)}</h1>
@@ -696,34 +709,35 @@
     ${auto ? `<div class="banner warn"><span class="grow">⚠ يوجد <b>${auto}</b> صنف «غير مصنف» أُضيف تلقائيًا من الاستيراد — حدّد نوعه ومجموعته ووحداته (النوع يحدد فترة التوصيل)</span><button class="sm" data-act="reviewAuto">مراجعة الأصناف</button></div>` : ''}
     ${excApplied ? `<div class="banner warn"><span class="grow">فترات استثنائية سارية على شهر الطلب ${monthLabel(res.orderMonth)}: تنطبق على <b>${excApplied}</b> صنف</span><button class="sm" data-act="nav" data-p="settings">الإعدادات</button></div>` : ''}
     ${archived ? `<div class="banner ok"><span class="grow">تم اعتماد طلب ${monthLabel(res.orderMonth)} بتاريخ ${esc(archived.approvedAt.slice(0, 10))}${archived.approver ? ' — ' + esc(archived.approver) : ''}</span><button class="sm" data-act="nav" data-p="archive">الأرشيف</button></div>` : ''}
+    ${V.restricted ? `<div class="banner brand"><span class="grow">تعرض أنواع: <b>${esc(V.types.join('، '))}</b> فقط (حسب صلاحياتك)</span></div>` : ''}
     <div class="kpis">
-      <div class="kpi"><div class="l">قيمة الطلب</div><div class="v">${money(t.orderValue)}</div><div class="s">${cur()}</div></div>
+      ${V.money ? `<div class="kpi"><div class="l">قيمة الطلب</div><div class="v">${money(t.orderValue)}</div><div class="s">${cur()}</div></div>` : ''}
       <div class="kpi"><div class="l">أصناف مطلوبة</div><div class="v">${fmt(t.ordered)}</div><div class="s">من ${fmt(t.active)} صنف نشط</div></div>
-      <div class="kpi"><div class="l">قيمة المخزون</div><div class="v">${money(t.stockValue)}</div><div class="s">${cur()}</div></div>
+      ${V.money ? `<div class="kpi"><div class="l">قيمة المخزون</div><div class="v">${money(t.stockValue)}</div><div class="s">${cur()}</div></div>
       <div class="kpi"><div class="l">قيمة بالطريق</div><div class="v">${money(t.transitValue)}</div><div class="s">${cur()}</div></div>
-      <div class="kpi"><div class="l">قيمة الحد الأقصى</div><div class="v">${money(t.maxValue)}</div><div class="s">${cur()}</div></div>
+      <div class="kpi"><div class="l">قيمة الحد الأقصى</div><div class="v">${money(t.maxValue)}</div><div class="s">${cur()}</div></div>` : ''}
       <div class="kpi"><div class="l">المتاح ÷ الحد الأقصى</div><div class="v">${pct(ratio)}</div><div class="s">المخزون + بالطريق</div></div>
     </div>
-    ${cashBanner()}
+    ${V.money && !V.restricted ? cashBanner() : ''}
     ${demurrageBanner()}
-    <div class="card"><h2>حسب نوع الصنف</h2>${table('dashType', [
+    <div class="card"><h2>حسب نوع الصنف</h2>${table('dashType', mc([
         { k: 'key', h: 'النوع' },
         { k: 'active', h: 'نشطة', n: true }, { k: 'ordered', h: 'مطلوبة', n: true },
         { k: 'orderValue', h: 'قيمة الطلب', n: true }, { k: 'stockValue', h: 'المخزون', n: true },
         { k: 'transitValue', h: 'بالطريق', n: true }, { k: 'maxValue', h: 'الحد الأقصى', n: true }
-      ], typeRows, { nofilter: true, short: true, sort: 'orderValue', onRow: r => { ui.f.order.type = r.key; go('order'); }, foot: { key: 'الإجمالي', active: fmt(t.active), ordered: fmt(t.ordered), orderValue: money(t.orderValue), stockValue: money(t.stockValue), transitValue: money(t.transitValue), maxValue: money(t.maxValue) } })}
+      ]), typeRows, { nofilter: true, short: true, sort: 'orderValue', onRow: r => { ui.f.order.type = r.key; go('order'); }, foot: V.money ? { key: 'الإجمالي', active: fmt(t.active), ordered: fmt(t.ordered), orderValue: money(t.orderValue), stockValue: money(t.stockValue), transitValue: money(t.transitValue), maxValue: money(t.maxValue) } : { key: 'الإجمالي', active: fmt(t.active), ordered: fmt(t.ordered) } })}
       <p class="small">اضغط على أي سطر لفتح قائمة الطلب مفلترة.</p></div>
     <div class="grid g2">
-      <div class="card"><h2>حسب التصنيف</h2>${table('dashCls', [
+      <div class="card"><h2>حسب التصنيف</h2>${table('dashCls', mc([
         { k: 'key', h: 'التصنيف', f: r => `<span class="cls">${r.key}</span>` },
         { k: 'service', h: 'مستوى الخدمة', n: true, f: r => pct(r.service) },
         { k: 'items', h: 'عدد الأصناف', n: true }, { k: 'ordered', h: 'مطلوبة', n: true },
         { k: 'orderValue', h: 'قيمة الطلب', n: true }
-      ], clsRows, { nofilter: true, short: true, onRow: r => { ui.f.order.cls = r.key; go('order'); } })}</div>
-      <div class="card"><h2>حسب المجموعة الرئيسية</h2>${table('dashGrp', [
+      ]), clsRows, { nofilter: true, short: true, onRow: r => { ui.f.order.cls = r.key; go('order'); } })}</div>
+      <div class="card"><h2>حسب المجموعة الرئيسية</h2>${table('dashGrp', mc([
         { k: 'key', h: 'المجموعة' }, { k: 'items', h: 'الأصناف', n: true }, { k: 'ordered', h: 'مطلوبة', n: true },
         { k: 'orderValue', h: 'قيمة الطلب', n: true }, { k: 'stockValue', h: 'المخزون', n: true }
-      ], grpRows, { nofilter: true, short: true, onRow: r => { ui.f.order.group = r.key; go('order'); } })}</div>
+      ]), grpRows, { nofilter: true, short: true, onRow: r => { ui.f.order.group = r.key; go('order'); } })}</div>
     </div>`;
   };
 
@@ -778,9 +792,27 @@
   }
 
   // ---------- قائمة الطلب ----------
+  // قيود العرض للمستخدم في طلب الشراء: الأنواع اللي يشوفها، والأعمدة المخفية عنه
+  const ORDER_HIDEABLE = [['mainItem', 'الصنف الرئيسي'], ['type', 'النوع'], ['cls', 'التصنيف'], ['purchaseUnit', 'الوحدة'], ['avgP', 'متوسط شهري'], ['stockP', 'المخزون'], ['transitP', 'بالطريق'], ['maxP', 'الحد الأقصى'], ['suggested', 'الطلب المقترح'], ['delta', 'تعديل (+/−)'], ['costP', 'تكلفة الوحدة'], ['coverageAfter', 'التغطية بعد الطلب'], ['orderValue', 'قيمة الطلب'], ['reason', 'سبب التعديل'], ['status', 'الحالة']];
+  function myView() {
+    const u = (ui.user && db.users.find(x => x.username === ui.user.username)) || ui.user || {};
+    const types = Array.isArray(u.orderTypes) ? u.orderTypes.filter(t => db.types.some(x => x.name === t)) : [];
+    const hide = Array.isArray(u.orderHide) ? u.orderHide : [];
+    return { types, hide, money: !hide.includes('orderValue') && !hide.includes('costP'), restricted: types.length > 0 };
+  }
+  const typeOk = r => { const v = myView(); return !v.restricted || v.types.includes(r.type); };
+  const myTypes = () => { const v = myView(); return v.restricted ? v.types : db.types.map(t => t.name); };
+  const myRows = () => res.rows.filter(typeOk);
+  function myAgg() {
+    const rows = myRows(), m = new Map(), add = (map, k, r) => { if (!map.has(k)) map.set(k, { key: k, items: 0, active: 0, ordered: 0, orderValue: 0, stockValue: 0, transitValue: 0, maxValue: 0 }); const g = map.get(k); g.items++; if (r.active) g.active++; if (r.final > 0) g.ordered++; g.orderValue += r.orderValue; g.stockValue += r.stockValue; g.transitValue += r.transitValue; g.maxValue += r.maxValue; };
+    const tot = new Map(), bt = new Map(), bc = new Map(), bg = new Map();
+    for (const r of rows) { add(tot, 'الإجمالي', r); add(bt, r.type || '—', r); add(bc, r.cls, r); add(bg, r.group || '—', r); }
+    void m;
+    return { totals: tot.get('الإجمالي') || { items: 0, active: 0, ordered: 0, orderValue: 0, stockValue: 0, transitValue: 0, maxValue: 0 }, byType: [...bt.values()], byClass: [...bc.values()], byGroup: [...bg.values()] };
+  }
   function orderRows() {
     const f = ui.f.order, q = f.q.trim().toLowerCase();
-    return res.rows.filter(r =>
+    return myRows().filter(r =>
       (f.type === 'الكل' || r.type === f.type) &&
       (f.group === 'الكل' || r.group === f.group) &&
       (f.cls === 'الكل' || r.cls === f.cls) &&
@@ -807,7 +839,7 @@
     { k: 'orderValue', h: 'قيمة الطلب', n: true, f: r => money(r.orderValue) },
     { k: 'reason', h: 'سبب التعديل', f: r => ui.printing ? esc(r.reason) : `<input class="cell-input wide" id="rsn_${esc(r.code)}" data-chg="reason" data-code="${esc(r.code)}" value="${esc(r.reason)}" ${r.delta || r.reason ? '' : 'placeholder="—"'}>` },
     { k: 'status', h: 'الحالة', f: r => statusPill(r) }
-  ].filter(c => !ui.printing || !['mainItem', 'status', 'costP'].includes(c.k));
+  ].filter(c => (!ui.printing || !['mainItem', 'status', 'costP'].includes(c.k)) && !myView().hide.includes(c.k) && (myView().money || !['costP', 'orderValue'].includes(c.k)));
   function statusPill(r) {
     const c = r.status === 'يطلب' ? 'brand' : r.status === 'لا يطلب' ? '' : r.status === 'موقوف' ? '' : 'bad';
     return `<span class="pill ${c}">${r.status}</span>${r.autoAdded ? ' <span class="pill warn" title="غير مصنف — مضاف تلقائيًا">جديد</span>' : ''}${r.excMonths ? ` <span class="pill warn" title="فترة استثنائية +${r.excMonths} شهر">+${r.excMonths}</span>` : ''}`;
@@ -818,7 +850,7 @@
     const vis = colFiltered('order', ORDER_COLS(), rows);
     const tv = vis.reduce((a, r) => a + r.orderValue, 0);
     const cnt = vis.filter(r => r.final > 0).length;
-    const types = db.types.map(t => t.name), groups = db.groups, classes = db.classes.map(c => c.code);
+    const types = myTypes(), groups = db.groups, classes = db.classes.map(c => c.code), V = myView();
     const archived = db.archive.find(a => a.orderMonth === res.orderMonth);
     return `
     <div class="page-head"><div><h1>قائمة الطلب الشهرية — ${monthLabel(res.orderMonth)}</h1>
@@ -832,16 +864,16 @@
       <label class="chk">عرض <select data-chg="filter" data-f="order.show"><option value="ordered" ${f.show === 'ordered' ? 'selected' : ''}>المطلوبة فقط</option><option value="adjusted" ${f.show === 'adjusted' ? 'selected' : ''}>المعدّلة يدويًا</option><option value="all" ${f.show === 'all' ? 'selected' : ''}>كل الأصناف</option></select></label>
       <input type="search" id="qOrder" placeholder="بحث برقم أو اسم الصنف…" value="${esc(f.q)}" data-search="order.q">
       <span class="grow"></span>
-      <span class="pill brand">${fmt(cnt)} صنف</span><span class="pill brand">إجمالي ${money(tv)} ${cur()}</span>
+      <span class="pill brand">${fmt(cnt)} صنف</span>${V.money ? `<span class="pill brand">إجمالي ${money(tv)} ${cur()}</span>` : ''}${V.restricted ? `<span class="pill warn" title="حسب صلاحيات المستخدم">الأنواع: ${esc(V.types.join('، '))}</span>` : ''}
     </div>
-    ${table('order', ORDER_COLS(), rows, { sort: 'orderValue', dir: -1, empty: 'لا توجد أصناف مطلوبة بهذه الفلاتر', foot: { name: 'الإجمالي', final: '', orderValue: money(tv) } })}
+    ${table('order', ORDER_COLS(), rows, { sort: 'orderValue', dir: -1, empty: 'لا توجد أصناف مطلوبة بهذه الفلاتر', foot: { name: 'الإجمالي', final: '', orderValue: V.money ? money(tv) : '' } })}
     <div class="print-only" style="margin-top:30px"><table style="width:100%;text-align:center"><tr><td>إعداد: ____________</td><td>مراجعة: ____________</td><td>اعتماد المشتريات: ____________</td></tr></table></div>`;
   };
 
   // ---------- الحساب التفصيلي ----------
   function calcRows() {
     const f = ui.f.calc, q = f.q.trim().toLowerCase();
-    return res.rows.filter(r =>
+    return myRows().filter(r =>
       (f.type === 'الكل' || r.type === f.type) && (f.group === 'الكل' || r.group === f.group) && (f.cls === 'الكل' || r.cls === f.cls) &&
       (f.status === 'الكل' || r.status === f.status || (f.status === 'ملاحظات' && r.notes.length)) &&
       (!q || r.code.toLowerCase().includes(q) || r.name.toLowerCase().includes(q)));
@@ -860,7 +892,14 @@
       { k: 'maxLevel', h: 'الحد الأقصى', n: true, d: 1 }, { k: 'stock', h: 'المخزون', n: true, d: 2 }, { k: 'transit', h: 'بالطريق', n: true, d: 2 },
       { k: 'suggested', h: 'المقترح (وحدة الشراء)', n: true }, { k: 'final', h: 'النهائي', n: true }, { k: 'orderValue', h: 'قيمة الطلب', n: true },
       { k: 'coverage', h: 'التغطية الحالية', n: true, d: 1 }, { k: 'status', h: 'الحالة' }, { k: 'notes', h: 'ملاحظات', v: r => r.notes.join('؛ ') }
-    ];
+    ].filter(c => !calcHidden().has(c.k));
+  }
+  // أعمدة الحساب التفصيلي المقابلة للأعمدة المخفية في قائمة الطلب
+  function calcHidden() {
+    const V = myView(), map = { type: ['type'], cls: ['cls', 'clsAuto'], avgP: ['avg'], stockP: ['stock'], transitP: ['transit'], maxP: ['maxLevel'], suggested: ['suggested'], coverageAfter: ['coverage'], status: ['status'] };
+    const h = new Set(V.hide.flatMap(k => map[k] || []));
+    if (!V.money) ['cost', 'value6', 'orderValue'].forEach(k => h.add(k));
+    return h;
   }
   PAGES.calc = function () {
     const f = ui.f.calc;
@@ -869,7 +908,7 @@
     <div class="page-head"><div><h1>الحساب التفصيلي</h1><div class="sub">سطر لكل صنف — الكميات بالوحدة الأساسية. اضغط على أي صنف لعرض تفاصيل المعادلة.</div></div>
 </div>
     <div class="toolbar">
-      <label class="chk">النوع <select class="inp" data-chg="filter" data-f="calc.type">${opts(db.types.map(t => t.name), f.type, true)}</select></label>
+      <label class="chk">النوع <select class="inp" data-chg="filter" data-f="calc.type">${opts(myTypes(), f.type, true)}</select></label>
       <label class="chk">المجموعة <select class="inp" data-chg="filter" data-f="calc.group">${opts(db.groups, f.group, true)}</select></label>
       <label class="chk">التصنيف <select class="inp" data-chg="filter" data-f="calc.cls">${opts(db.classes.map(c => c.code), f.cls, true)}</select></label>
       <label class="chk">الحالة <select class="inp" data-chg="filter" data-f="calc.status">${opts(['يطلب', 'لا يطلب', 'موقوف', 'موقوف + تعديل', 'ملاحظات'], f.status, true)}</select></label>
@@ -902,7 +941,7 @@
         <div class="c"><div class="l">إجمالي ${res.months.length} أشهر</div><div class="v">${fmt(r.total, 2)}</div></div>
         <div class="c"><div class="l">المتوسط الشهري</div><div class="v">${fmt(r.avg, 2)}</div></div>
         <div class="c"><div class="l">الانحراف المعياري</div><div class="v">${fmt(r.std, 2)}</div></div>
-        <div class="c"><div class="l">تكلفة الوحدة الأساسية</div><div class="v">${fmt(r.cost, 4)}</div></div>
+        ${myView().money ? `<div class="c"><div class="l">تكلفة الوحدة الأساسية</div><div class="v">${fmt(r.cost, 4)}</div></div>` : ''}
         <div class="c"><div class="l">تصنيف الكمية / القيمة</div><div class="v">${r.clsQ} / ${r.clsV}</div></div>
         <div class="c"><div class="l">مستوى الخدمة / Z</div><div class="v">${pct(r.service)} / ${fmt(r.z, 3)}</div></div>
         <div class="c"><div class="l">المراجعة + التوصيل</div><div class="v">${fmt(r.review, 2)} + ${fmt(r.lead, 2)} = ${fmt(r.cover, 2)}</div></div>
@@ -916,10 +955,10 @@
         الحد الأقصى = ${n(r.expected)} + ${n(r.safety)} + ${n(r.extra)} = <b>${n(r.maxLevel)}</b> ${esc(r.baseUnit)}<br>
         المتاح = المخزون ${n(r.stock)} + بالطريق ${n(r.transit)} = <b>${n(r.available)}</b><br>
         الطلب المقترح = تقريب لأعلى ((${n(r.maxLevel)} − ${n(r.available)}) ÷ ${n(r.pf, 4)}) = <b>${n(r.suggested, 0)}</b> ${esc(r.purchaseUnit)}${r.active ? '' : ' (الصنف موقوف ⇒ صفر)'}<br>
-        الطلب النهائي = ${n(r.suggested, 0)} ${r.delta >= 0 ? '+' : '−'} ${n(Math.abs(r.delta), 2)} = <b>${n(r.final, 2)}</b> ${esc(r.purchaseUnit)} — القيمة <b>${n(r.orderValue, 0)}</b> ${cur()}
+        الطلب النهائي = ${n(r.suggested, 0)} ${r.delta >= 0 ? '+' : '−'} ${n(Math.abs(r.delta), 2)} = <b>${n(r.final, 2)}</b> ${esc(r.purchaseUnit)}${myView().money ? ` — القيمة <b>${n(r.orderValue, 0)}</b> ${cur()}` : ''}
       </div>
       <div class="grid g2" style="margin-top:14px">
-        <div><h3>أسطر المخزون</h3>${table('dStock', [{ k: 'unit', h: 'الوحدة' }, { k: 'qty', h: 'الكمية', n: true, d: 2 }, { k: 'cost', h: 'التكلفة', n: true, d: 4 }], stockRows, { static: true, short: true, empty: 'لا يوجد' })}</div>
+        <div><h3>أسطر المخزون</h3>${table('dStock', [{ k: 'unit', h: 'الوحدة' }, { k: 'qty', h: 'الكمية', n: true, d: 2 }].concat(myView().money ? [{ k: 'cost', h: 'التكلفة', n: true, d: 4 }] : []), stockRows, { static: true, short: true, empty: 'لا يوجد' })}</div>
         <div><h3>أسطر بالطريق</h3>${table('dTr', [{ k: 'unit', h: 'الوحدة' }, { k: 'qty', h: 'الكمية', n: true, d: 2 }, { k: 'source', h: 'المصدر' }], trRows, { static: true, short: true, empty: 'لا يوجد' })}</div>
       </div>`,
       foot: `<button class="primary" data-edit>تعديل الصنف</button><button data-close>إغلاق</button>`,
@@ -2031,7 +2070,7 @@
         { k: 'orderMonth', h: 'شهر الطلب', v: a => a.orderMonth, f: a => `<b>${monthLabel(a.orderMonth)}</b>` },
         { k: 'approvedAt', h: 'تاريخ الاعتماد', v: a => a.approvedAt, f: a => esc(a.approvedAt.replace('T', ' ').slice(0, 16)) },
         { k: 'approver', h: 'المعتمد' }, { k: 'count', h: 'أصناف مطلوبة', n: true, v: a => a.totals.ordered },
-        { k: 'value', h: 'قيمة الطلب', n: true, v: a => a.totals.orderValue, f: a => money(a.totals.orderValue) },
+        ...(myView().money && !myView().restricted ? [{ k: 'value', h: 'قيمة الطلب', n: true, v: a => a.totals.orderValue, f: a => money(a.totals.orderValue) }] : []),
         { k: 'stockDate', h: 'المخزون كما في' }, { k: 'note', h: 'ملاحظات', cls: 'wrap' },
         { k: 'act', h: '', nosort: true, f: a => `<button class="sm" data-act="archView" data-k="${a.id}">عرض</button> <button class="sm" data-act="archExport" data-k="${a.id}">تصدير</button> <button class="sm danger" data-act="archDel" data-k="${a.id}">حذف</button>` }
       ], rows, { empty: 'لا توجد طلبات معتمدة بعد' })}`;
@@ -2358,11 +2397,18 @@
     { header: 'الطلب النهائي', key: 'final', width: 12, fmt: '#,##0' }, { header: 'تكلفة الوحدة', key: 'cost', width: 12, fmt: '#,##0.00' }, { header: 'التغطية بعد الطلب (شهر)', key: 'coverage', width: 12, fmt: '0.0' },
     { header: 'قيمة الطلب', key: 'value', width: 14, fmt: '#,##0' }, { header: 'سبب التعديل', key: 'reason', width: 24 }, { header: 'اعتماد المشتريات', key: 'approve', width: 14, input: true }
   ];
+  // أعمدة التصدير حسب الأعمدة المسموحة للمستخدم
+  function myXCols() {
+    const V = myView(), map = { mainItem: ['mainItem'], type: ['type'], cls: ['cls'], purchaseUnit: ['unit'], avgP: ['avg'], stockP: ['stock'], transitP: ['transit'], maxP: ['max'], suggested: ['suggested'], delta: ['delta'], costP: ['cost'], coverageAfter: ['coverage'], orderValue: ['value'], reason: ['reason'] };
+    const h = new Set(V.hide.flatMap(k => map[k] || []));
+    if (!V.money) { h.add('value'); h.add('cost'); }
+    return ORDER_XCOLS.filter(c => !h.has(c.key));
+  }
   function exportOrder() {
     const rows = ui.tableRows.order || orderRows();
     const f = ui.f.order;
     const x = orderExportRows(rows);
-    exportSpec({ sheets: [{ name: 'قائمة الطلب', title: `قائمة الطلب الشهرية — ${monthLabel(res.orderMonth)}`, subtitle: `النوع: ${f.type} — المجموعة: ${f.group} — التصنيف: ${f.cls} — المخزون كما في ${db.stock.date || '—'} — المبيعات ${monthLabel(res.months[0])} إلى ${monthLabel(res.months[res.months.length - 1])}`, columns: ORDER_XCOLS, rows: x, totals: { name: 'الإجمالي', value: x.reduce((a, r) => a + r.value, 0) } }] }, `طلب-الشراء-${res.orderMonth}${f.type !== 'الكل' ? '-' + f.type : ''}`);
+    exportSpec({ sheets: [{ name: 'قائمة الطلب', title: `قائمة الطلب الشهرية — ${monthLabel(res.orderMonth)}`, subtitle: `النوع: ${f.type} — المجموعة: ${f.group} — التصنيف: ${f.cls} — المخزون كما في ${db.stock.date || '—'} — المبيعات ${monthLabel(res.months[0])} إلى ${monthLabel(res.months[res.months.length - 1])}`, columns: myXCols(), rows: x, totals: { name: 'الإجمالي', value: x.reduce((a, r) => a + r.value, 0) } }] }, `طلب-الشراء-${res.orderMonth}${f.type !== 'الكل' ? '-' + f.type : ''}`);
   }
   async function printOrPdf(pdf) {
     ui.printing = true; render();
@@ -2471,6 +2517,7 @@
 
   // ================= الاعتماد والأرشيف =================
   async function approve() {
+    if (myView().restricted) return toast('اعتماد الطلب لمستخدم يشوف كل الأنواع — صلاحياتك على أنواع محددة', 'bad');
     const existing = db.archive.find(a => a.orderMonth === res.orderMonth);
     const adjCount = Object.keys(db.adjustments).length;
     modal({
@@ -2520,22 +2567,23 @@
   }
   function archView(id) {
     const a = db.archive.find(x => x.id === id); if (!a) return;
-    const rows = archLines(a).filter(r => r.final > 0 || r.delta);
+    const V = myView(), rows = archLines(a).filter(r => (r.final > 0 || r.delta) && (!V.restricted || V.types.includes(r.type)));
+    const xk = new Set(myXCols().map(c => c.key));
     modal({
       title: `طلب ${monthLabel(a.orderMonth)} — معتمد ${esc(a.approvedAt.slice(0, 10))}${a.approver ? ' — ' + esc(a.approver) : ''}`, size: 'wide',
-      body: `<div class="row-flex" style="margin-bottom:10px"><span class="pill brand">${fmt(a.totals.ordered)} صنف</span><span class="pill brand">${money(a.totals.orderValue)} ${cur()}</span><span class="small">المبيعات ${monthLabel(a.months[0])} – ${monthLabel(a.months[a.months.length - 1])} — المخزون ${esc(a.stockDate || '—')} — المراجعة ${a.settings.reviewPeriod} شهر — ${a.types.map(t => `${esc(t.name)}: توصيل ${t.leadTime} + إضافي ${t.extraMonths}`).join(' | ')}${a.exceptions.length ? ' — استثنائية: ' + a.exceptions.map(x => esc(x.name)).join('، ') : ''}</span></div>
+      body: `<div class="row-flex" style="margin-bottom:10px"><span class="pill brand">${fmt(V.restricted ? rows.filter(r => r.final > 0).length : a.totals.ordered)} صنف</span>${V.money ? `<span class="pill brand">${money(V.restricted ? rows.reduce((x, r) => x + num(r.value), 0) : a.totals.orderValue)} ${cur()}</span>` : ''}<span class="small">المبيعات ${monthLabel(a.months[0])} – ${monthLabel(a.months[a.months.length - 1])} — المخزون ${esc(a.stockDate || '—')} — المراجعة ${a.settings.reviewPeriod} شهر — ${a.types.map(t => `${esc(t.name)}: توصيل ${t.leadTime} + إضافي ${t.extraMonths}`).join(' | ')}${a.exceptions.length ? ' — استثنائية: ' + a.exceptions.map(x => esc(x.name)).join('، ') : ''}</span></div>
         ${a.note ? `<p>${esc(a.note)}</p>` : ''}
         ${table('archLines', [{ k: 'i', h: 'م', n: true }, { k: 'code', h: 'رقم الصنف' }, { k: 'name', h: 'اسم الصنف', cls: 'wrap' }, { k: 'type', h: 'النوع' }, { k: 'cls', h: 'التصنيف' }, { k: 'unit', h: 'الوحدة' },
           { k: 'avg', h: 'متوسط', n: true, d: 1 }, { k: 'stock', h: 'المخزون', n: true, d: 1 }, { k: 'transit', h: 'بالطريق', n: true, d: 1 }, { k: 'max', h: 'الحد الأقصى', n: true, d: 1 },
-          { k: 'suggested', h: 'المقترح', n: true }, { k: 'delta', h: 'تعديل', n: true, d: 2 }, { k: 'final', h: 'النهائي', n: true, d: 2 }, { k: 'value', h: 'القيمة', n: true }, { k: 'reason', h: 'السبب' }], rows, { static: true, short: true, pageSize: 200 })}`,
+          { k: 'suggested', h: 'المقترح', n: true }, { k: 'delta', h: 'تعديل', n: true, d: 2 }, { k: 'final', h: 'النهائي', n: true, d: 2 }, { k: 'value', h: 'القيمة', n: true }, { k: 'reason', h: 'السبب' }].filter(c => ['i', 'code', 'name', 'final'].includes(c.k) || xk.has(c.k)), rows, { static: true, short: true, pageSize: 200 })}`,
       foot: `<button class="primary" data-x>تصدير Excel</button><button data-close>إغلاق</button>`,
       onMount: m => { m.q('[data-x]').onclick = () => archExport(id); }
     });
   }
   function archExport(id) {
     const a = db.archive.find(x => x.id === id); if (!a) return;
-    const x = archLines(a).filter(r => r.final > 0 || r.delta);
-    exportSpec({ sheets: [{ name: 'طلب معتمد', title: `طلب الشراء المعتمد — ${monthLabel(a.orderMonth)}`, subtitle: `اعتماد ${a.approvedAt.slice(0, 10)}${a.approver ? ' — ' + a.approver : ''} — المخزون كما في ${a.stockDate || '—'}${a.note ? ' — ' + a.note : ''}`, columns: ORDER_XCOLS, rows: x, totals: { name: 'الإجمالي', value: x.reduce((s, r) => s + r.value, 0) } }] }, `طلب-معتمد-${a.orderMonth}`);
+    const V = myView(), x = archLines(a).filter(r => (r.final > 0 || r.delta) && (!V.restricted || V.types.includes(r.type))).map((r, i) => Object.assign({}, r, { i: i + 1 }));
+    exportSpec({ sheets: [{ name: 'طلب معتمد', title: `طلب الشراء المعتمد — ${monthLabel(a.orderMonth)}`, subtitle: `اعتماد ${a.approvedAt.slice(0, 10)}${a.approver ? ' — ' + a.approver : ''} — المخزون كما في ${a.stockDate || '—'}${a.note ? ' — ' + a.note : ''}`, columns: myXCols(), rows: x, totals: { name: 'الإجمالي', value: x.reduce((s, r) => s + r.value, 0) } }] }, `طلب-معتمد-${a.orderMonth}`);
   }
 
   // ================= الأحداث =================
