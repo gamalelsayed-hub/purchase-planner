@@ -274,4 +274,26 @@ assert.strictEqual(db.po.orders.K1.track.stage, 'emptyReturned'); assert.ok(db.p
   assert.strictEqual(L[0].name, 'مكانس 60 سم 12 ح');
 }
 
+// تقرير أوامر الشراء الكامل: المخزن، مركز التكلفة (رقمه منسكب في خانة الشحن)، رسوم الشحن، والمخلّص يتسجل كجهة لو مو موجود
+{
+  const d4 = E.emptyDb();
+  const hdr = ['المخلص الجمركي', 'رسوم الشحن', 'مركز التكلفة', 'الكمية المتبقية', 'كمية الفاتورة', 'سعر امر الشراء', 'كمية امر الشراء', 'المخزن', 'الوحدة', 'اسم الصنف', 'رقم الصنف', 'رقم الأمر', 'تاريخ امر الشراء'];
+  const rows = [hdr,
+    ['برق المحيط', '12600 9011', 'موردون خارجيون -نايف محمد', 5, 0, 100, 5, 1101, 'حبه', 'س', 'C1', 'R1', '01/02/2026'],
+    [null, null, 'مركز عام 8001', 5, 0, 100, 5, 1002, 'حبه', 'ص', 'C2', 'R1', '01/02/2026'],
+    [null, 9006, 'موردون خارجيون -وعد الشروق ل', 5, 0, 100, 5, 1101, 'حبه', 'ع', 'C3', 'R2', '03/02/2026'],
+    [null, 9000, 'مؤسسة اديب 9008', 5, 0, 100, 5, 1101, 'حبه', 'ع', 'C3', 'R3', '03/02/2026']];
+  const dh = I.detectHeader(rows, 'po');
+  I.applyPOs(d4, I.rowsToRecords(rows, dh.row, dh.map, 'poNo'), { date: '2026-03-10' });
+  const R1 = d4.po.orders.R1, R2 = d4.po.orders.R2, R3 = d4.po.orders.R3;
+  assert.strictEqual(R1.costCenter, 'موردون خارجيون -نايف محمد 9011'); assert.strictEqual(R1.shipping, 12600);
+  assert.strictEqual(R1.warehouse, '1101، 1002');
+  assert.strictEqual(R2.costCenter, 'موردون خارجيون -وعد الشروق ل 9006'); assert.ok(!R2.shipping, 'spilled code is not shipping');
+  assert.strictEqual(R3.shipping, 9000, 'real shipping kept when cost center already has its code');
+  const cl = d4.parties.find(p => p.kind === 'clearer' && p.name === 'برق المحيط');
+  assert.ok(cl, 'clearer party created'); assert.strictEqual(R1.track.clearer, cl.id);
+  I.applyPOs(d4, I.rowsToRecords(rows, dh.row, dh.map, 'poNo'), { date: '2026-03-11' });
+  assert.strictEqual(d4.parties.filter(p => p.name === 'برق المحيط').length, 1, 'no duplicate party on re-import');
+}
+
 console.log('✓ all engine unit tests passed');

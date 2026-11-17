@@ -1329,7 +1329,7 @@
   // ---------- أوامر الشراء: شاشة موحدة (المتابعة + السداد + المعاملات الخارجية) ----------
   const curName = c => (db.currencies.find(x => x.code === c) || { name: c }).name;
   const ALERTS = ['متأخر في مرحلته', 'متأخر عن الخطة', 'تأخر الشحن', 'مطلوب تلكس', 'غرامة حاويات', 'قربت أيام السماح', 'بدون تاريخ أمر', 'لا يزال في التقرير'];
-  const MF_GROUPS = [['main', 'الحالة'], ['stage', 'المرحلة'], ['fw', 'الوكيل / مكتب الاستيراد'], ['cl', 'المخلّص'], ['sup', 'المورد'], ['pay', 'السداد'], ['cur', 'العملة'], ['shipc', 'قيمة الشحن'], ['pod', 'تاريخ الأمر'], ['bl', 'رقم البوليصة'], ['alert', 'تنبيهات']];
+  const MF_GROUPS = [['main', 'الحالة'], ['stage', 'المرحلة'], ['fw', 'الوكيل / مكتب الاستيراد'], ['cl', 'المخلّص'], ['sup', 'المورد'], ['cc', 'مركز التكلفة'], ['wh', 'المخزن'], ['pay', 'السداد'], ['cur', 'العملة'], ['shipc', 'قيمة الشحن'], ['pod', 'تاريخ الأمر'], ['bl', 'رقم البوليصة'], ['alert', 'تنبيهات']];
   const mfState = () => { const f = ui.f.m || (ui.f.m = { main: ['بانتظار الاعتماد', 'صادر', 'مشحون — بدون أوراق', 'مشحون — استلمنا الأوراق'], stage: [], fw: [], cl: [], sup: [], pay: [], cur: [], alert: [], q: '' }); MF_GROUPS.forEach(([g]) => { if (!Array.isArray(f[g])) f[g] = []; }); return f; };
   // كل الأوامر بكل المعلومات (السداد + المتابعة + الخطة) في سطر واحد
   function masterAll() { return memo('master', masterAllRaw); }
@@ -1348,18 +1348,18 @@
       if (o.flags.includes('stillInReport')) alerts.push('لا يزال في التقرير');
       return Object.assign({}, o, {
         stageName: o.foreign ? t.stageName : '', stageIdx: o.foreign ? t.stageIdx : -1, since: t.since, daysIn: t.daysIn, stageDays: t.stageDays, late: !!t.late && o.foreign, party: t.party,
-        forwarder: t.forwarder || '', clearer: t.clearer || o.agent || '', containers: t.containers || [], containersOpen: t.containersOpen || 0, demurrageLeft: t.demurrageLeft, demurrageOverdue: t.demurrageOverdue, demurrageSoon: t.demurrageSoon,
+        forwarder: t.forwarder || '', clearer: t.clearer || o.agent || '', costCenter: po.costCenter || '', warehouse: po.warehouse || '', containers: t.containers || [], containersOpen: t.containersOpen || 0, demurrageLeft: t.demurrageLeft, demurrageOverdue: t.demurrageOverdue, demurrageSoon: t.demurrageSoon,
         needTelex: !!t.needTelex, portEta: t.portEta || '', lastStatus: t.lastStatus || '', closed: !!t.closed, docType: t.docType || '', alerts, trackPill: t
       });
     });
   }
   const mfValue = (g, o) => g === 'main' ? [o.mainStatus] : g === 'stage' ? [o.stageName || '— محلي (بدون مراحل) —'] : g === 'fw' ? [o.forwarder || '— بدون —'] : g === 'cl' ? [o.clearer || '— بدون —'] :
-    g === 'sup' ? [o.supplier || '— بدون —'] : g === 'pay' ? [o.payStatus] : g === 'cur' ? [curName(o.currency)] : g === 'shipc' ? [num(o.shipping) > 0 ? 'الشحن مسجّل' : 'الشحن فارغ'] : g === 'pod' ? [o.poDate ? 'تاريخ الأمر موجود' : 'تاريخ الأمر فارغ'] : g === 'bl' ? [String(o.blNo || '').trim() ? 'البوليصة موجودة' : 'البوليصة فارغة'] : g === 'alert' ? o.alerts : [];
+    g === 'sup' ? [o.supplier || '— بدون —'] : g === 'cc' ? [o.costCenter || '— بدون —'] : g === 'wh' ? (o.warehouse ? o.warehouse.split('، ') : ['— بدون —']) : g === 'pay' ? [o.payStatus] : g === 'cur' ? [curName(o.currency)] : g === 'shipc' ? [num(o.shipping) > 0 ? 'الشحن مسجّل' : 'الشحن فارغ'] : g === 'pod' ? [o.poDate ? 'تاريخ الأمر موجود' : 'تاريخ الأمر فارغ'] : g === 'bl' ? [String(o.blNo || '').trim() ? 'البوليصة موجودة' : 'البوليصة فارغة'] : g === 'alert' ? o.alerts : [];
   function masterRows(except) {
     const f = mfState(), q = (f.q || '').trim().toLowerCase();
     return masterAll().filter(o => {
       for (const [g] of MF_GROUPS) { if (g === except || !f[g].length) continue; const vs = mfValue(g, o); if (!vs.some(v => f[g].includes(v))) return false; }
-      if (q && !(o.no.toLowerCase().includes(q) || o.blNo.toLowerCase().includes(q) || o.supplier.toLowerCase().includes(q) || o.forwarder.toLowerCase().includes(q) || o.clearer.toLowerCase().includes(q) || o.note.toLowerCase().includes(q) ||
+      if (q && !(o.no.toLowerCase().includes(q) || o.blNo.toLowerCase().includes(q) || o.supplier.toLowerCase().includes(q) || o.forwarder.toLowerCase().includes(q) || o.clearer.toLowerCase().includes(q) || o.costCenter.toLowerCase().includes(q) || o.note.toLowerCase().includes(q) ||
         o.containers.some(c => c.no.toLowerCase().includes(q)) || (db.po.orders[o.no].lines || []).some(l => l.code.toLowerCase().includes(q) || String(l.name).toLowerCase().includes(q)))) return false;
       return true;
     });
@@ -1387,7 +1387,7 @@
     { k: 'mainStatus', h: 'الحالة', def: true, v: o => E.MAIN_STATUSES.indexOf(o.mainStatus), f: o => mainPill(o) },
     { k: 'stageIdx', h: 'المرحلة', def: true, v: o => o.stageIdx, f: o => o.foreign ? trackPill(o.trackPill) + (o.daysIn != null && !o.closed ? ` <span class="small" style="${o.late ? 'color:var(--bad);font-weight:700' : ''}">${fmt(o.daysIn)}/${fmt(o.stageDays || 0)} يوم</span>` : '') : '<span class="small">محلي</span>' },
     { k: 'poDate', h: 'تاريخ الأمر', def: true },
-    { k: 'supplier', h: 'المورد', def: true }, { k: 'forwarder', h: 'الوكيل / مكتب الاستيراد', def: true }, { k: 'clearer', h: 'المخلّص', def: true },
+    { k: 'supplier', h: 'المورد', def: true }, { k: 'costCenter', h: 'مركز التكلفة', def: true, cls: 'wrap' }, { k: 'warehouse', h: 'المخزن', def: true }, { k: 'forwarder', h: 'الوكيل / مكتب الاستيراد', def: true }, { k: 'clearer', h: 'المخلّص', def: true },
     { k: 'blNo', h: 'البوليصة', def: true, f: o => esc(o.blNo) + (o.docType ? ` <span class="small">(${esc(o.docType)})</span>` : '') },
     { k: 'containers', h: 'الحاويات', def: true, v: o => o.containers.map(c => c.no).join(' '), f: o => o.containers.length ? `${fmt(o.containers.length)} <span class="small">(${fmt(o.containersOpen)} لم تُسلّم)</span>` : '' },
     { k: 'demurrageLeft', h: 'أيام السماح', def: true, n: true, f: o => demCell(o) },
@@ -1655,6 +1655,8 @@
       <div class="form f4">
         <label class="f">المورد<input id="o_sup" value="${esc(o.supplier || '')}" ${dis(canPay)}></label>
         <label class="f">المخلّص (اسم من التقرير)<input id="o_agent" value="${esc(o.agent || '')}" ${dis(canPay)}></label>
+        <label class="f">مركز التكلفة<input id="o_cc" value="${esc(o.costCenter || '')}" ${dis(canPay)}></label>
+        <label class="f">المخزن<input id="o_wh" value="${esc(o.warehouse || '')}" ${dis(canPay)}></label>
         <label class="f">العملة<select id="o_cur" ${dis(canPay)}>${db.currencies.map(c => `<option value="${esc(c.code)}" ${o.currency === c.code ? 'selected' : ''}>${esc(c.name)} (${c.rate})</option>`).join('')}</select></label>
         <label class="f">سعر صرف خاص (فارغ = من الإعدادات)<input id="o_rate" type="number" step="any" value="${o.rate || ''}" ${dis(canPay)}></label>
         <label class="f">رسوم الشحن (بعملة الأمر)<input id="o_ship" type="number" step="any" value="${o.shipping || ''}" ${dis(canPay)}></label>
@@ -1708,6 +1710,7 @@
         const save = () => {
           if (canPay) {
             o.supplier = m.q('#o_sup').value.trim(); o.agent = m.q('#o_agent').value.trim(); o.currency = m.q('#o_cur').value;
+            if (m.q('#o_cc')) { o.costCenter = m.q('#o_cc').value.trim(); o.warehouse = m.q('#o_wh').value.trim(); }
             o.rate = m.q('#o_rate').value === '' ? null : num(m.q('#o_rate').value); o.shipping = num(m.q('#o_ship').value);
             if (m.q('#o_val')) o.manualValue = num(m.q('#o_val').value);
           }

@@ -74,7 +74,11 @@
         { key: 'supplier', label: 'المورد', aliases: ['المورد', 'اسم المورد', 'supplier', 'vendor'] },
         { key: 'currency', label: 'العملة', aliases: ['العملة', 'currency'] },
         { key: 'poDate', label: 'تاريخ الأمر', aliases: ['تاريخ الأمر', 'تاريخ الامر', 'تاريخ امر الشراء', 'تاريخ أمر الشراء', 'تاريخ امر الشر', 'تاريخ امر', 'التاريخ', 'date'] },
-        { key: 'eta', label: 'تاريخ الوصول المتوقع', aliases: ['تاريخ الوصول المتوقع', 'تاريخ الوصول', 'الوصول المتوقع', 'eta'] }
+        { key: 'eta', label: 'تاريخ الوصول المتوقع', aliases: ['تاريخ الوصول المتوقع', 'تاريخ الوصول', 'الوصول المتوقع', 'eta'] },
+        { key: 'warehouse', label: 'المخزن', aliases: ['المخزن', 'المستودع', 'رقم المخزن', 'warehouse'] },
+        { key: 'costCenter', label: 'مركز التكلفة', aliases: ['مركز التكلفة', 'مركز التكلفه', 'cost center', 'costcenter'] },
+        { key: 'shipping', label: 'رسوم الشحن', aliases: ['رسوم الشحن', 'تكلفة الشحن', 'الشحن', 'shipping', 'freight'] },
+        { key: 'clearer', label: 'المخلّص الجمركي', aliases: ['المخلص الجمركي', 'المخلّص الجمركي', 'المخلص', 'المخلّص', 'clearer'] }
       ]
     },
     poPay: {
@@ -337,6 +341,25 @@
     const rest = toks.filter((_, j) => j !== i).join(' ');
     return { unit: toks[i], name: (name + ' ' + rest).trim() };
   }
+  // تقرير PDF: رقم مركز التكلفة (مثل 9011) أحيانًا ينطبع في خانة رسوم الشحن، لحاله («9011») أو ملتصق بالقيمة («12600 9011»)
+  function fixCostCenter(r) {
+    let cc = String(r.costCenter == null ? '' : r.costCenter).trim(), sh = r.shipping == null ? '' : String(r.shipping).trim();
+    if (cc && !/\d{3,}\s*$/.test(cc) && sh) {
+      const t = sh.split(/\s+/);
+      if (t.length > 1 && /^\d{3,5}$/.test(t[t.length - 1])) { cc += ' ' + t.pop(); sh = t.join(' '); }
+      else if (t.length === 1 && /^[89]\d{3}$/.test(t[0])) { cc += ' ' + t[0]; sh = ''; }
+    }
+    return { costCenter: cc, shipping: sh === '' ? null : num(sh) };
+  }
+  // جهة (وكيل/مخلّص) بالاسم — تنضاف إذا ما كانت موجودة
+  function ensureParty(db, kind, name) {
+    const nm = String(name || '').trim(); if (!nm) return '';
+    db.parties = db.parties || [];
+    let p = db.parties.find(x => x.kind === kind && norm(x.name) === norm(nm));
+    if (!p) { p = { id: 'P' + Date.now() + Math.random().toString(36).slice(2, 6), kind, name: nm, contact: '', phone: '', email: '', freeDays: null, statusMap: [] }; db.parties.push(p); }
+    return p.id;
+  }
+  const mostCommon = arr => { const m = new Map(); arr.filter(Boolean).forEach(v => m.set(v, (m.get(v) || 0) + 1)); return [...m].sort((a, b) => b[1] - a[1]).map(x => x[0])[0] || ''; };
   function applyPOs(db, recs, { date, user, file } = {}) {
     const po = ensurePo(db);
     const day = date || new Date().toISOString().slice(0, 10);
@@ -345,9 +368,10 @@
     for (const r of recs) {
       if (!r.poNo || !/\d/.test(r.poNo) || /[^\w\-./]/.test(r.poNo) || !r.code || /[٠-٩:]/.test(r.code) || !(isNum(r.qty) || isNum(r.remaining))) { skipped++; continue; }
       if (!groups.has(r.poNo)) groups.set(r.poNo, []);
-      const qty = num(r.qty), inv = num(r.invQty), nu = splitUnit(db, r.code, r.unit, r.name);
+      const qty = num(r.qty), inv = num(r.invQty), nu = splitUnit(db, r.code, r.unit, r.name), cs = fixCostCenter(r);
+      r._cc = cs.costCenter; r._ship = cs.shipping;
       groups.get(r.poNo).push({
-        code: r.code, name: nu.name, unit: nu.unit, qty, value: Math.abs(num(r.value)), invQty: inv,
+        code: r.code, name: nu.name, unit: nu.unit, qty, warehouse: r.warehouse == null ? '' : String(r.warehouse).trim(), costCenter: cs.costCenter, value: Math.abs(num(r.value)), invQty: inv,
         remaining: isNum(r.remaining) ? num(r.remaining) : Math.max(0, qty - inv), _r: r
       });
     }
@@ -368,6 +392,15 @@
       if (!o.currency) o.currency = defaultCurrency(db, o.lines) || 'SAR';
       const pd = toDate(first.poDate); if (pd) o.poDate = pd;
       const eta = toDate(first.eta); if (eta) { o.eta = eta; o.etaManual = true; }
+      // المخزن ومركز التكلفة (الأكثر تكرارًا بين أسطر الأمر)، ورسوم الشحن والمخلّص إذا موجودة في التقرير
+      const whs = [...new Set(o.lines.map(l => l.warehouse).filter(Boolean))];
+      if (whs.length) o.warehouse = whs.join('، ');
+      const cc = mostCommon(o.lines.map(l => l.costCenter).filter(c => !/^مركز عام/.test(c))) || mostCommon(o.lines.map(l => l.costCenter));
+      if (cc) o.costCenter = cc;
+      const ships = lines.map(l => l._r._ship).filter(v => v != null && v > 0);
+      if (ships.length) { const uniq = [...new Set(ships)]; o.shipping = uniq.length === 1 ? uniq[0] : uniq.reduce((a, v) => a + v, 0); }
+      const cl = mostCommon(lines.map(l => String(l._r.clearer || '').trim()));
+      if (cl) { o.agent = cl; o.track = o.track || { history: [], containers: [] }; o.track.clearer = ensureParty(db, 'clearer', cl); }
       o.flags = (o.flags || []).filter(f => f !== 'stillInReport');
       const allDone = o.lines.every(l => num(l.remaining) <= 0);
       if (allDone && o.status === 'open') { o.status = 'received'; o.receivedAt = day; o.receivedBy = 'auto'; o.receivedNote = 'الكمية المتبقية صفر'; res.completed.push(no); }
