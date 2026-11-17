@@ -259,4 +259,19 @@ assert.strictEqual(db.po.orders.K1.track.stage, 'emptyReturned'); assert.ok(db.p
   assert.strictEqual(z9.etaStages, '2026-11-24');
 }
 
+// تقرير PDF: آخر اسم الصنف داخل خانة الوحدة ← نطلّع الوحدة الصحيحة ونرجع الباقي للاسم، ونقرأ «تاريخ امر الشر» المقصوص
+{
+  const d3 = E.emptyDb();
+  d3.items.push({ code: 'U1', name: 'مكنسة', baseUnit: 'حبه', units: [], type: 'خارجي', active: true }, { code: 'U2', name: 'سلك', baseUnit: 'كرتون2', units: [], type: 'خارجي', active: true });
+  const hdr = ['تاريخ امر الشر', 'الكمية المتبقية', 'كمية الفاتورة', 'سعر امر الشراء', 'كمية امر الشراء', 'الوحدة', 'اسم الصنف', 'رقم الصنف', 'رقم الأمر'];
+  const rows = [hdr, ['05/03/2026', 10, 0, 100, 10, '12 ح حبه', 'مكانس 60 سم', 'U1', 'Q1'], ['05/03/2026', 5, 0, 50, 5, 'كرتون 2', 'سلك لحام شد', 'U2', 'Q1'], ['05/03/2026', 3, 0, 30, 3, 'ع كيس', 'قفل', 'U3', 'Q1']];
+  const dh = I.detectHeader(rows, 'po');
+  assert.strictEqual(dh.map.poDate, 0, 'truncated PO date header is detected');
+  I.applyPOs(d3, I.rowsToRecords(rows, dh.row, dh.map, 'poNo'), { date: '2026-03-10' });
+  const L = d3.po.orders.Q1.lines;
+  assert.strictEqual(d3.po.orders.Q1.poDate, '2026-03-05');
+  assert.deepStrictEqual(L.map(l => l.unit), ['حبه', 'كرتون2', 'كيس']);
+  assert.strictEqual(L[0].name, 'مكانس 60 سم 12 ح');
+}
+
 console.log('✓ all engine unit tests passed');

@@ -73,7 +73,7 @@
         { key: 'remaining', label: 'الكمية المتبقية', aliases: ['الكمية المتبقية', 'المتبقي', 'remaining'] },
         { key: 'supplier', label: 'المورد', aliases: ['المورد', 'اسم المورد', 'supplier', 'vendor'] },
         { key: 'currency', label: 'العملة', aliases: ['العملة', 'currency'] },
-        { key: 'poDate', label: 'تاريخ الأمر', aliases: ['تاريخ الأمر', 'تاريخ الامر', 'التاريخ', 'date'] },
+        { key: 'poDate', label: 'تاريخ الأمر', aliases: ['تاريخ الأمر', 'تاريخ الامر', 'تاريخ امر الشراء', 'تاريخ أمر الشراء', 'تاريخ امر الشر', 'تاريخ امر', 'التاريخ', 'date'] },
         { key: 'eta', label: 'تاريخ الوصول المتوقع', aliases: ['تاريخ الوصول المتوقع', 'تاريخ الوصول', 'الوصول المتوقع', 'eta'] }
       ]
     },
@@ -322,6 +322,21 @@
 
   // استيراد تقرير أوامر الشراء (سطر لكل صنف). التقرير = كل الأوامر المفتوحة الآن:
   // أمر موجود ← يتحدث ، أمر جديد ← يُضاف ، أمر مفتوح اختفى من التقرير ← «وصل المخزون» تلقائيًا.
+  // تقرير PDF: آخر اسم الصنف الطويل أحيانًا ينطبع داخل خانة الوحدة («12 ح حبه») — نطلّع الوحدة ونرجع الباقي للاسم
+  function splitUnit(db, code, unitRaw, nameRaw) {
+    const u = String(unitRaw || '').trim(), name = String(nameRaw || '').trim();
+    const toks = u.split(/\s+/).filter(Boolean);
+    if (toks.length <= 1) return { unit: u, name };
+    const it = (db.items || []).find(i => i.code === code);
+    const known = it ? [it.baseUnit, it.purchaseUnit].concat((it.units || []).map(x => x.name)).filter(Boolean).map(normUnit) : [];
+    const whole = normUnit(u.replace(/\s+/g, ''));
+    if (known.includes(whole)) return { unit: u.replace(/\s+/g, ''), name };
+    let i = toks.map(normUnit).findIndex(t => known.includes(t));
+    if (i < 0) for (let j = toks.length - 1; j >= 0; j--) if (!/^[\d.]+$/.test(toks[j]) && toks[j].length > 1) { i = j; break; }
+    if (i < 0) return { unit: u, name };
+    const rest = toks.filter((_, j) => j !== i).join(' ');
+    return { unit: toks[i], name: (name + ' ' + rest).trim() };
+  }
   function applyPOs(db, recs, { date, user, file } = {}) {
     const po = ensurePo(db);
     const day = date || new Date().toISOString().slice(0, 10);
@@ -330,9 +345,9 @@
     for (const r of recs) {
       if (!r.poNo || !/\d/.test(r.poNo) || /[^\w\-./]/.test(r.poNo) || !r.code || /[٠-٩:]/.test(r.code) || !(isNum(r.qty) || isNum(r.remaining))) { skipped++; continue; }
       if (!groups.has(r.poNo)) groups.set(r.poNo, []);
-      const qty = num(r.qty), inv = num(r.invQty);
+      const qty = num(r.qty), inv = num(r.invQty), nu = splitUnit(db, r.code, r.unit, r.name);
       groups.get(r.poNo).push({
-        code: r.code, name: String(r.name || '').trim(), unit: String(r.unit || '').trim(), qty, value: Math.abs(num(r.value)), invQty: inv,
+        code: r.code, name: nu.name, unit: nu.unit, qty, value: Math.abs(num(r.value)), invQty: inv,
         remaining: isNum(r.remaining) ? num(r.remaining) : Math.max(0, qty - inv), _r: r
       });
     }
