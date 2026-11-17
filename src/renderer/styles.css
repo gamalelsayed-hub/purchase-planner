@@ -229,3 +229,4 @@ code { font-family: Consolas, monospace; background: #f1f3f6; padding: 1px 5px; 
 .fchip input { margin: 0; }
 .fchip.on { background: var(--brand-soft); border-color: var(--brand); font-weight: 600; }
 .fchip .small { opacity: .7; }
+.howto { margin: 6px 0 0; padding-inline-start: 22px; line-height: 1.9; }
