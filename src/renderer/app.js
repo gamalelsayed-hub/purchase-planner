@@ -1329,7 +1329,7 @@
   // ---------- أوامر الشراء: شاشة موحدة (المتابعة + السداد + المعاملات الخارجية) ----------
   const curName = c => (db.currencies.find(x => x.code === c) || { name: c }).name;
   const ALERTS = ['متأخر في مرحلته', 'متأخر عن الخطة', 'تأخر الشحن', 'مطلوب تلكس', 'غرامة حاويات', 'قربت أيام السماح', 'بدون تاريخ أمر', 'لا يزال في التقرير'];
-  const MF_GROUPS = [['main', 'الحالة'], ['stage', 'المرحلة'], ['fw', 'الوكيل / مكتب الاستيراد'], ['cl', 'المخلّص'], ['sup', 'المورد'], ['wh', 'المخزن'], ['pay', 'السداد'], ['cur', 'العملة'], ['shipc', 'قيمة الشحن'], ['pod', 'تاريخ الأمر'], ['bl', 'رقم البوليصة'], ['alert', 'تنبيهات']];
+  const MF_GROUPS = [['main', 'الحالة'], ['stage', 'المرحلة'], ['fw', 'CO'], ['cl', 'المخلّص'], ['sup', 'المورد'], ['wh', 'المخزن'], ['pay', 'السداد'], ['cur', 'العملة'], ['shipc', 'قيمة الشحن'], ['pod', 'تاريخ الأمر'], ['bl', 'رقم البوليصة'], ['alert', 'تنبيهات']];
   const mfState = () => { const f = ui.f.m || (ui.f.m = { main: ['بانتظار الاعتماد', 'صادر', 'مشحون — بدون أوراق', 'مشحون — استلمنا الأوراق'], stage: [], fw: [], cl: [], sup: [], pay: [], cur: [], alert: [], q: '' }); MF_GROUPS.forEach(([g]) => { if (!Array.isArray(f[g])) f[g] = []; }); return f; };
   // كل الأوامر بكل المعلومات (السداد + المتابعة + الخطة) في سطر واحد
   function masterAll() { return memo('master', masterAllRaw); }
@@ -1387,7 +1387,7 @@
     { k: 'mainStatus', h: 'الحالة', def: true, v: o => E.MAIN_STATUSES.indexOf(o.mainStatus), f: o => mainPill(o) },
     { k: 'stageIdx', h: 'المرحلة', def: true, v: o => o.stageIdx, f: o => o.foreign ? trackPill(o.trackPill) + (o.daysIn != null && !o.closed ? ` <span class="small" style="${o.late ? 'color:var(--bad);font-weight:700' : ''}">${fmt(o.daysIn)}/${fmt(o.stageDays || 0)} يوم</span>` : '') : '<span class="small">محلي</span>' },
     { k: 'poDate', h: 'تاريخ الأمر', def: true },
-    { k: 'supplier', h: 'المورد', def: true }, { k: 'costCenter', h: 'مركز التكلفة (كما في النظام)', cls: 'wrap' }, { k: 'warehouse', h: 'المخزن', def: true }, { k: 'forwarder', h: 'الوكيل / مكتب الاستيراد', def: true }, { k: 'clearer', h: 'المخلّص', def: true },
+    { k: 'supplier', h: 'المورد', def: true }, { k: 'costCenter', h: 'مركز التكلفة (كما في النظام)', cls: 'wrap' }, { k: 'warehouse', h: 'المخزن', def: true }, { k: 'forwarder', h: 'CO', def: true }, { k: 'clearer', h: 'المخلّص', def: true },
     { k: 'blNo', h: 'البوليصة', def: true, f: o => esc(o.blNo) + (o.docType ? ` <span class="small">(${esc(o.docType)})</span>` : '') },
     { k: 'containers', h: 'الحاويات', def: true, v: o => o.containers.map(c => c.no).join(' '), f: o => o.containers.length ? `${fmt(o.containers.length)} <span class="small">(${fmt(o.containersOpen)} لم تُسلّم)</span>` : '' },
     { k: 'demurrageLeft', h: 'أيام السماح', def: true, n: true, f: o => demCell(o) },
@@ -1482,11 +1482,11 @@
         ...MS.map((s, i) => ({ k: 's' + i, h: 'منه ' + s, n: true })), { k: 'paidSar', h: 'مدفوع مقدمًا', n: true }, { k: 'dueSar', h: 'المطلوب', n: true, f: b => `<b>${money(b.dueSar)}</b>` }, { k: 'cum', h: 'تراكمي', n: true }
       ], buckets, { short: true, nofilter: true, empty: 'لا يوجد كاش مطلوب' })}</div>
       <div class="grid g2">
-        <div class="card"><h2>حسب الوكيل / مكتب الاستيراد (خلال ${H} يوم)</h2>${table('cashFw', [{ k: 'key', h: 'الوكيل' }, { k: 'count', h: 'أوامر', n: true }, { k: 'dueSar', h: 'المطلوب', n: true }], byParty('forwarder'), { short: true, nofilter: true, sort: 'dueSar' })}</div>
+        <div class="card"><h2>حسب CO (خلال ${H} يوم)</h2>${table('cashFw', [{ k: 'key', h: 'CO' }, { k: 'count', h: 'أوامر', n: true }, { k: 'dueSar', h: 'المطلوب', n: true }], byParty('forwarder'), { short: true, nofilter: true, sort: 'dueSar' })}</div>
         <div class="card"><h2>حسب المخلّص (خلال ${H} يوم)</h2>${table('cashAgents', [{ k: 'key', h: 'المخلّص' }, { k: 'count', h: 'أوامر', n: true }, { k: 'dueSar', h: 'المطلوب', n: true }], byParty('clearer'), { short: true, nofilter: true, sort: 'dueSar' })}</div>
       </div>
       <div class="card"><h2>الأوامر المطلوب سدادها خلال ${H} يوم</h2>${table('cashList', [
-        { k: 'eta', h: 'الوصول المتوقع', f: etaCell }, { k: 'no', h: 'رقم الأمر' }, { k: 'mainStatus', h: 'الحالة', f: o => mainPill(o) }, { k: 'blNo', h: 'البوليصة' }, { k: 'forwarder', h: 'الوكيل' }, { k: 'clearer', h: 'المخلّص' }, { k: 'supplier', h: 'المورد' }, { k: 'currency', h: 'العملة', v: o => curName(o.currency) },
+        { k: 'eta', h: 'الوصول المتوقع', f: etaCell }, { k: 'no', h: 'رقم الأمر' }, { k: 'mainStatus', h: 'الحالة', f: o => mainPill(o) }, { k: 'blNo', h: 'البوليصة' }, { k: 'forwarder', h: 'CO' }, { k: 'clearer', h: 'المخلّص' }, { k: 'supplier', h: 'المورد' }, { k: 'currency', h: 'العملة', v: o => curName(o.currency) },
         { k: 'total', h: 'الإجمالي بالعملة', n: true, d: 2 }, { k: 'totalSar', h: 'الإجمالي ' + cur(), n: true }, { k: 'paidSar', h: 'مدفوع', n: true }, { k: 'dueSar', h: 'المطلوب', n: true, f: o => `<b>${money(o.dueSar)}</b>` },
         { k: 'payStatus', h: 'السداد', f: o => payPill(o.payStatus) }, { k: 'note', h: 'ملاحظة', cls: 'wrap' }
       ], inH, { sort: 'eta', dir: 1, onRow: o => poModal(o.no), empty: 'لا يوجد', foot: { no: 'الإجمالي', totalSar: money(sum(inH, 'totalSar')), paidSar: money(sum(inH, 'paidSar')), dueSar: money(sum(inH)) } })}</div>`;
@@ -1655,7 +1655,7 @@
       <div class="form f4">
         <label class="f">المورد<input id="o_sup" value="${esc(o.supplier || '')}" ${dis(canPay)}></label>
         <label class="f">المخلّص (اسم من التقرير)<input id="o_agent" value="${esc(o.agent || '')}" ${dis(canPay)}></label>
-        <label class="f">مركز التكلفة (= مكتب الاستيراد في النظام)<input id="o_cc" value="${esc(o.costCenter || '')}" ${dis(canPay)}></label>
+        <label class="f">مركز التكلفة (= CO في النظام)<input id="o_cc" value="${esc(o.costCenter || '')}" ${dis(canPay)}></label>
         <label class="f">المخزن<input id="o_wh" value="${esc(o.warehouse || '')}" ${dis(canPay)}></label>
         <label class="f">العملة<select id="o_cur" ${dis(canPay)}>${db.currencies.map(c => `<option value="${esc(c.code)}" ${o.currency === c.code ? 'selected' : ''}>${esc(c.name)} (${c.rate})</option>`).join('')}</select></label>
         <label class="f">سعر صرف خاص (فارغ = من الإعدادات)<input id="o_rate" type="number" step="any" value="${o.rate || ''}" ${dis(canPay)}></label>
@@ -1789,7 +1789,7 @@
       ${t.clearerInfo ? `<div class="formula" style="margin:6px 0">📋 من تقرير المخلّص (${esc(t.clearerInfo.at || '')}): ${[['رقم المعاملة', t.clearerInfo.consig], ['البيان الجمركي', t.clearerInfo.bayan], ['المنشأ', t.clearerInfo.origin], ['المنفذ', t.clearerInfo.port], ['وصول المنفذ', t.portEta], ['الحاويات', t.clearerInfo.qty], ['وكيل الملاحة', t.clearerInfo.agent], ['رسوم العمليات', t.clearerInfo.opsFee ? fmt(t.clearerInfo.opsFee, 2) : ''], ['الرسوم الجمركية', t.clearerInfo.duties ? fmt(t.clearerInfo.duties, 2) : ''], ['تم', (t.clearerInfo.flags || []).join('، ')]].filter(x => x[1]).map(x => `<b>${x[0]}:</b> ${esc(x[1])}`).join(' — ')}${(o.track || {}).clearerNote ? `<br><b>ملاحظة المخلّص:</b> ${esc(o.track.clearerNote)}` : ''}</div>` : ''}
       <div class="row-flex" style="margin:6px 0 10px">${trackPill(t)}<span class="small">عند ${esc(t.party || '—')} منذ ${esc(t.since || '—')}${t.daysIn != null ? ' (' + t.daysIn + ' يوم' + (t.stageDays ? ' من ' + t.stageDays : '') + ')' : ''}${tr.lastStatus ? ' — آخر حالة من المخلّص: «' + esc(tr.lastStatus) + '» ' + esc(tr.lastStatusAt || '') : ''}</span></div>
       <div class="form f4">
-        <label class="f">الوكيل / مكتب الاستيراد<select id="t_fw" ${dis}><option value="">—</option>${fws.map(p => `<option value="${esc(p.id)}" ${tr.forwarder === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+        <label class="f">CO<select id="t_fw" ${dis}><option value="">—</option>${fws.map(p => `<option value="${esc(p.id)}" ${tr.forwarder === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
         <label class="f">المخلّص الجمركي<select id="t_cl" ${dis}><option value="">—</option>${cls.map(p => `<option value="${esc(p.id)}" ${tr.clearer === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
         <label class="f">نوع مستند الشحن<select id="t_doc" ${dis}><option value="">—</option>${['بوليصة', 'تلكس'].map(x => `<option ${tr.docType === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
         <label class="f">أيام السماح للحاوية (فارغ = ${fmt(t.freeDays)})<input id="t_free" type="number" step="1" min="0" value="${tr.freeDays || ''}" ${dis}></label>
@@ -1878,11 +1878,11 @@
         <label class="f">نبّهني قبل انتهاء أيام السماح بـ (يوم)<input class="inp" type="number" step="1" min="0" data-chg="set" data-k="demurrageWarnDays" value="${esc(db.settings.demurrageWarnDays)}"></label>
       </div></div>
     ${clearerFormSettingsHtml()}
-    <div class="card"><h2>الوكلاء ومكاتب الشحن والمخلّصين</h2>
+    <div class="card"><h2>CO والمخلّصين</h2>
       <div class="hint">أيام السماح للوكيل تغلب الافتراضي. لكل جهة جدول «تحويل الحالات»: النص اللي يكتبه المخلّص في شيته ← مرحلتنا.</div>
       <div style="overflow:auto"><table class="t" style="margin-top:8px"><thead><tr><th>النوع</th><th>الاسم</th><th>الشخص المسؤول</th><th>الجوال</th><th>الإيميل</th><th>أيام السماح</th><th>تحويل الحالات</th><th></th></tr></thead><tbody>
       ${(db.parties || []).map((p, i) => `<tr>
-        <td><select class="inp" data-chg="party" data-i="${i}" data-k="kind"><option value="forwarder" ${p.kind === 'forwarder' ? 'selected' : ''}>وكيل / مكتب شحن</option><option value="clearer" ${p.kind === 'clearer' ? 'selected' : ''}>مخلّص جمركي</option></select></td>
+        <td><select class="inp" data-chg="party" data-i="${i}" data-k="kind"><option value="forwarder" ${p.kind === 'forwarder' ? 'selected' : ''}>CO</option><option value="clearer" ${p.kind === 'clearer' ? 'selected' : ''}>مخلّص جمركي</option></select></td>
         <td><input class="inp" style="width:150px" data-chg="party" data-i="${i}" data-k="name" value="${esc(p.name)}"></td>
         <td><input style="width:120px" data-chg="party" data-i="${i}" data-k="contact" value="${esc(p.contact || '')}"></td>
         <td><input style="width:110px" data-chg="party" data-i="${i}" data-k="phone" value="${esc(p.phone || '')}"></td>
@@ -1891,7 +1891,7 @@
         <td><button class="sm" data-act="partyMap" data-i="${i}">${fmt((p.statusMap || []).length)} حالة ✎</button></td>
         <td><button class="sm danger" data-act="partyDel" data-i="${i}">حذف</button></td></tr>`).join('') || '<tr><td colspan="8" class="muted">لا توجد جهات بعد</td></tr>'}
       </tbody></table></div>
-      <div class="row-flex" style="margin-top:8px"><button class="sm" data-act="partyAdd" data-k="forwarder">+ وكيل / مكتب شحن</button><button class="sm" data-act="partyAdd" data-k="clearer">+ مخلّص جمركي</button><button class="sm" data-act="partyMap" data-i="-1">تحويل الحالات العام (${fmt((db.trackStatusMap || []).length)})</button></div>
+      <div class="row-flex" style="margin-top:8px"><button class="sm" data-act="partyAdd" data-k="forwarder">+ CO</button><button class="sm" data-act="partyAdd" data-k="clearer">+ مخلّص جمركي</button><button class="sm" data-act="partyMap" data-i="-1">تحويل الحالات العام (${fmt((db.trackStatusMap || []).length)})</button></div>
     </div>`;
   }
   function statusMapModal(i, preset, after) {
@@ -1989,7 +1989,7 @@
           <label class="f">تاريخ المرحلة<input id="b_sdate" type="date" value="${today()}"></label>
           <label class="f">ملاحظة المرحلة<input id="b_snote"></label>
           <label class="chk" style="margin-top:22px"><input type="checkbox" id="b_back"> اسمح بالرجوع لمرحلة سابقة</label>
-          <label class="f">الوكيل / مكتب الاستيراد<select id="b_fw">${keep}<option value="__clear">— مسح —</option>${fws.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label>
+          <label class="f">CO<select id="b_fw">${keep}<option value="__clear">— مسح —</option>${fws.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label>
           <label class="f">المخلّص الجمركي<select id="b_cl">${keep}<option value="__clear">— مسح —</option>${cls.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label>
           <label class="f">نوع مستند الشحن<select id="b_doc">${keep}<option>بوليصة</option><option>تلكس</option></select></label>
           <label class="f">أيام السماح للحاوية<input id="b_free" type="number" step="1" min="0" placeholder="بدون تغيير"></label>
@@ -2646,7 +2646,7 @@
     },
     stgAdd: () => { db.shipStages.push({ id: 'S' + Date.now(), name: 'مرحلة جديدة', party: '', days: '', marks: '' }); commit(); },
     stgReset: async () => { if (!await confirmBox('استرجاع المراحل الافتراضية؟ المراحل المخصصة تنحذف.', { ok: 'استرجاع', danger: true })) return; db.shipStages = E.defaultShipStages(); commit(); },
-    partyAdd: el => { db.parties.push({ id: 'P' + Date.now(), kind: el.dataset.k, name: el.dataset.k === 'clearer' ? 'مخلّص جديد' : 'وكيل جديد', contact: '', phone: '', email: '', freeDays: null, statusMap: [] }); commit(); },
+    partyAdd: el => { db.parties.push({ id: 'P' + Date.now(), kind: el.dataset.k, name: el.dataset.k === 'clearer' ? 'مخلّص جديد' : 'CO جديد', contact: '', phone: '', email: '', freeDays: null, statusMap: [] }); commit(); },
     partyDel: async el => { const p = db.parties[+el.dataset.i]; if (!await confirmBox(`حذف «${esc(p.name)}»؟`, { ok: 'حذف', danger: true })) return; db.parties.splice(+el.dataset.i, 1); commit(); },
     partyMap: el => statusMapModal(+el.dataset.i),
     poBulkImport: () => bulkImportFiles(),
