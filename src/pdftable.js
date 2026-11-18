@@ -10,8 +10,56 @@ const clean = s => String(s || '').normalize('NFKC').replace(/[‎‏‪-‮]/g,
 // تحويل الأرقام الهندية (٠١٢٣) إلى عربية (0123)
 const digits = s => s.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/٫/g, '.');
 
+// تقرير المخلّص (بيان المعاملات تحت التخليص — Crystal/4Link): الصفحة مدوّرة، فكل معاملة = عمود رأسي (محور x)
+// وكل حقل = مسافة على محور y. العناوين الإنجليزية (Consig # / BL # / Container / Status.N / EX DO LK SGP) تحدد الحقول.
+const CLR_HEAD = { 'L.N': 'ln', 'Consig #': 'consig', 'Client Name': 'client', 'Importer name': 'importer', 'BL #': 'bl', 'QTY': 'qty', 'Agent': 'agent', 'Container': 'container', 'Bayan': 'bayan', 'Dam': 'dam', 'ETA': 'eta', 'Port': 'port', 'coo': 'coo', 'Terminal': 'terminal', 'Status.N': 'status', 'Duties': 'duties', 'port': 'ops', 'Description': 'desc', 'Descaription': 'desc', 'EX': 'EX', 'DO': 'DO', 'LK': 'LK', 'SGP': 'SGP' };
+const CLR_FLAG = { EX: 'شحن', DO: 'تسليم', LK: 'ربط', SGP: 'مواني' };
+async function readClearerPdf(doc) {
+  const recs = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const tc = await page.getTextContent();
+    const items = tc.items.filter(it => clean(it.str) && Math.abs(it.transform[0]) < 0.01 && it.transform[1] > 0)
+      .map(it => ({ s: clean(it.str), r: it.transform[4], f0: it.transform[5], f1: it.transform[5] + (it.width || 0) }));
+    const heads = items.filter(it => CLR_HEAD[it.s] && it.r > 200 && it.r < 236);
+    if (heads.length < 10) continue;
+    const cols = heads.map(h => ({ k: CLR_HEAD[h.s], c: (h.f0 + h.f1) / 2 })).sort((a, b) => b.c - a.c);
+    const fieldOf = y => { let best = null, d = Infinity; for (const c of cols) { const dd = Math.abs(c.c - y); if (dd < d) { d = dd; best = c.k; } } return best; };
+    const hdrR = Math.max(...heads.map(h => h.r));
+    const lnC = (cols.find(c => c.k === 'ln') || {}).c;
+    const serials = items.filter(it => it.r > hdrR + 8 && /^\d{1,4}$/.test(it.s) && lnC != null && Math.abs((it.f0 + it.f1) / 2 - lnC) < 10).sort((a, b) => a.r - b.r);
+    const gaps = serials.slice(1).map((x, i) => x.r - serials[i].r).sort((a, b) => a - b);
+    const step = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 26;
+    serials.forEach((sr, i) => {
+      const r0 = sr.r - 3, r1 = i + 1 < serials.length ? serials[i + 1].r - 3 : sr.r + step - 3;
+      const cells = {};
+      for (const it of items) {
+        if (it.r < r0 || it.r >= r1 || it === sr) continue;
+        const k = fieldOf((it.f0 + it.f1) / 2); (cells[k] = cells[k] || []).push(it);
+      }
+      // نص الخلية: الأسطر بالترتيب (r)، وداخل السطر من اليمين لليسار (y نازل) مع مسافة بين الكلمات
+      const text = k => {
+        const its = (cells[k] || []).slice().sort((a, b) => Math.round(a.r) - Math.round(b.r) || b.f0 - a.f0);
+        let out = '', prev = null;
+        for (const it of its) {
+          if (prev && (Math.round(it.r) !== Math.round(prev.r) || prev.f0 - it.f1 > 1.2 || it.s.length > 1 || prev.s.length > 1)) out += ' ';
+          out += it.s; prev = it;
+        }
+        return digits(out).replace(/\s+/g, ' ').trim();
+      };
+      const rec = { ln: sr.s };
+      for (const k of new Set(cols.map(c => c.k))) if (!CLR_FLAG[k]) { const t = text(k); if (t) rec[k] = t; }
+      rec.flags = Object.keys(CLR_FLAG).filter(k => (cells[k] || []).some(it => /[*•●]/.test(it.s))).map(k => CLR_FLAG[k]);
+      if (rec.consig || rec.bl) recs.push(rec);
+    });
+  }
+  return recs;
+}
+
 async function readPdfTable(data) {
   const doc = await pdfjs.getDocument({ data: new Uint8Array(data), disableFontFace: true, useSystemFonts: false, isEvalSupported: false }).promise;
+  const clr = await readClearerPdf(doc);
+  if (clr.length) return { sheets: [{ name: 'تقرير المخلّص', rows: [['بيان المعاملات تحت التخليص', 'رقم البوليصه', 'رقم الحاوية']], clearerPdf: clr }] };
   const out = [];
   let header = null; // [{text, x}]
   for (let p = 1; p <= doc.numPages; p++) {

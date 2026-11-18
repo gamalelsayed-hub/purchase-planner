@@ -302,4 +302,32 @@ assert.strictEqual(db.po.orders.K1.track.stage, 'emptyReturned'); assert.ok(db.p
   assert.strictEqual(d4.parties.filter(p => p.kind === 'forwarder').length, 3, 'one office per cost center, no duplicates');
 }
 
+// النموذج الموحد الجديد: حالة المعاملة = أعمدة النجمة، وأكثر من حاوية لنفس الأمر، وتقرير المخلّص PDF
+{
+  const d5 = E.emptyDb(); d5.shipStages = E.defaultShipStages(); d5.clearerForm = I.defaultClearerForm();
+  d5.po.orders.K1 = { no: 'K1', status: 'open', currency: 'USD', lines: [], payments: [], shipped: true, shipDate: '2026-10-01', firstSeen: '2026-09-01', poDate: '2026-09-01' };
+  d5.po.orders.K2 = { no: 'K2', status: 'open', currency: 'USD', lines: [], payments: [], shipped: true, shipDate: '2026-10-01', firstSeen: '2026-09-01', poDate: '2026-09-01' };
+  const hdr = I.KINDS.track.fields.filter(f => f.form !== false).map(f => f.label);
+  assert.deepStrictEqual(hdr.slice(0, 3), ['رقم معاملة العميل', 'رقم المعاملة لدى المخلّص', 'رقم البوليصة']);
+  assert.ok(!hdr.includes('المنشأ') && !hdr.includes('حالة المعاملة') && !hdr.includes('مطلوب تلكس منّا'), 'removed columns not in form');
+  const row = o => hdr.map(h => o[h] == null ? null : o[h]);
+  const rows = [hdr,
+    row({ 'رقم معاملة العميل': 'K1', 'رقم الحاوية': 'ABCU1234567', 'عدد الحاويات': 2, 'حالة الشحنة': 'وصلت (في الميناء)', 'وصول المنفذ الفعلي': '2026-11-10', 'تسليم (DO)': '*', 'ربط (LK)': '*' }),
+    row({ 'رقم معاملة العميل': 'K1', 'رقم الحاوية': 'ABCU7654321', 'عدد الحاويات': 2, 'حالة الشحنة': 'وصلت (في الميناء)', 'تسليم (DO)': '*', 'ربط (LK)': '*' }),
+    row({ 'رقم معاملة العميل': 'K2', 'حالة الشحنة': 'لم تصل (بالطريق)', 'ملاحظات': 'NEED TELEX' })];
+  const dh = I.detectHeader(rows, 'track');
+  const res = I.applyTrack(d5, I.rowsToRecords(rows, dh.row, dh.map, 'poNo'), { date: '2026-11-12' });
+  assert.deepStrictEqual(res.unmapped, {});
+  assert.strictEqual(d5.po.orders.K1.track.containers.length, 2, 'two containers on one PO');
+  assert.strictEqual(d5.po.orders.K1.track.stage, 'customs', 'LK star → customs');
+  assert.strictEqual(d5.po.orders.K1.track.clearerInfo.qty, '2');
+  assert.ok(d5.po.orders.K2.track.needTelex, 'NEED TELEX in notes');
+  // PDF: السجلات جاهزة من قارئ PDF ← نفس المسار
+  const pdfRecs = I.parseClearerPdf([{ consig: '19000', bl: 'BLX1', container: 'ZGXU 3004349|ZGXU 2989549', eta: 'مي 2026/11/20 12:00:00AM ن', port: 'اءجدةا لإ س لا مي', terminal: 'Arrived', status: 'تحصيلرسوم', desc: 'NEED TELEX-K2', flags: ['تسليم', 'ربط', 'مواني'] }], d5);
+  assert.deepStrictEqual(pdfRecs[0].containers, ['ZGXU3004349', 'ZGXU2989549']);
+  assert.strictEqual(pdfRecs[0].extra.port, 'ميناء جدة الإسلامي'); assert.strictEqual(pdfRecs[0].portEta, '2026-11-20');
+  assert.ok(pdfRecs[0].extra.needTelex);
+  assert.strictEqual(I.mapTrackStatus(d5, 'تحصيلرسوم'), 'customs'); assert.strictEqual(I.mapTrackStatus(d5, 'مواني'), 'customs');
+}
+
 console.log('✓ all engine unit tests passed');

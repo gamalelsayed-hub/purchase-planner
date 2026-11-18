@@ -185,6 +185,8 @@
     if (!Array.isArray(d.parties)) d.parties = [];
     if (!Array.isArray(d.trackStatusMap)) d.trackStatusMap = [];
     if (!d.clearerForm || !Array.isArray(d.clearerForm.txStatuses)) d.clearerForm = I.defaultClearerForm();
+    // النموذج الموحد الجديد: حالة المعاملة = أعمدة النجمة (شحن/تسليم/ربط/مواني) زي تقرير المخلّص، وقوائم جديدة
+    if ((d.clearerForm.v || 1) < 2) d.clearerForm = I.defaultClearerForm();
     // ترقية الصلاحيات: المستخدم المطابق لقالب ياخذ إضافات القالب الجديدة (المعاملات الخارجية)
     if ((d.meta.permsV || 1) < 2) {
       for (const u of d.users) {
@@ -2432,38 +2434,48 @@
   // النموذج الموحد للمخلّصين: معبّأ بمعاملاتنا (للمخلّص المختار أو الكل) + قوائم منسدلة إلزامية من ورقة «القوائم»
   function trackTemplateSpec(partyId) {
     const F = db.clearerForm || I.defaultClearerForm();
-    const ts = trackSum().filter(t => !t.closed && (t.foreign || db.po.orders[t.no].track) && (!partyId || (db.po.orders[t.no].track || {}).clearer === partyId || !(db.po.orders[t.no].track || {}).clearer && t.stageIdx >= (db.shipStages || []).findIndex(s => s.marks === 'shipped')));
+    // المعاملات النشطة: أمر مفتوح، أو وصل لكن حاوياته لسه ما رجعت فارغة
+    const live = t => { const o = db.po.orders[t.no]; return o.status === 'open' && !o.pendingApproval || (t.containers || []).some(c => !c.emptyAt); };
+    const ts = trackSum().filter(t => !t.closed && live(t) && (t.foreign || db.po.orders[t.no].track) && (!partyId || (db.po.orders[t.no].track || {}).clearer === partyId || !(db.po.orders[t.no].track || {}).clearer && t.stageIdx >= (db.shipStages || []).findIndex(s => s.marks === 'shipped')));
+    const portI = (db.shipStages || []).findIndex(x => x.marks === 'port');
+    const shipTxt = st => ((F.shipStatuses || []).find(x => x.stage === st) || {}).text || '';
+    const flagKey = Object.fromEntries(I.FLAG_COLS.map(([k, t]) => [t.replace(/\s*\(.*\)/, ''), k]));
     const rows = [];
     for (const t of ts) {
       const o = db.po.orders[t.no], tr = o.track || {}, ci = tr.clearerInfo || {};
-      const base = { poNo: t.no, consig: ci.consig || '', blNo: t.blNo, docType: tr.docType || '', shipAgent: ci.agent || '', origin: ci.origin || '', port: ci.port || '', portEta: tr.portEta || '', bayan: ci.bayan || '', needTelex: tr.needTelex ? 'نعم' : '' };
-      if (t.containers.length) for (const c of t.containers) rows.push(Object.assign({}, base, { containerNo: c.no, containerType: c.type || '', portDate: c.portAt || '', warehouseDate: c.warehouseAt || '', emptyDate: c.emptyAt || '' }));
-      else rows.push(Object.assign({}, base, { containerNo: '' }));
+      // «20x2 - جاف» من تقرير المخلّص = حاويتين 20 قدم
+      const qm = String(ci.qty || '').match(/(\d{2})\s*x\s*(\d+)/i), size = qm ? qm[1] + ' قدم' : '';
+      const base = { poNo: t.no, consig: ci.consig || '', blNo: t.blNo, docType: tr.docType || '', containerCount: qm ? +qm[2] : (ci.qty || t.containers.length || ''), shipAgent: ci.agent || '', goods: ci.goods || '', port: ci.port || '',
+        // حالة الشحنة من كلام المخلّص نفسه (Arrived / On vessel)، وإلا من مرحلتنا
+        shipStatus: ci.terminal ? (/^\s*arrived|وصلت/i.test(ci.terminal) ? shipTxt('port') : shipTxt('shipped')) : t.stageIdx >= portI && portI >= 0 ? shipTxt('port') : t.stageIdx >= 0 && (o.shipped || t.stageIdx >= (db.shipStages || []).findIndex(x => x.marks === 'shipped')) ? shipTxt('shipped') : '',
+        statusDate: tr.lastStatusAt || '', bayan: ci.bayan || '', duties: ci.duties || '', note: tr.clearerNote || '' };
+      for (const f of ci.flags || []) if (flagKey[f]) base[flagKey[f]] = '*';
+      if (t.containers.length) for (const c of t.containers) rows.push(Object.assign({}, base, { containerNo: c.no, containerType: c.type || size, portDate: c.portAt || tr.portAt || '', warehouseDate: c.warehouseAt || '', emptyDate: c.emptyAt || '' }));
+      else rows.push(Object.assign({}, base, { containerNo: '', portDate: tr.portAt || '' }));
     }
-    const lists = [
-      ['حالة الشحنة', F.shipStatuses.map(x => x.text)], ['حالة المعاملة', F.txStatuses.map(x => x.text)], ['المنشأ', F.origins], ['المنفذ', F.ports],
-      ['نوع وحجم الحاوية', F.containerTypes], ['نوع المستند', F.docTypes], ['نعم / لا', F.yesNo]
-    ];
+    const lists = [['حالة الشحنة', F.shipStatuses.map(x => x.text)], ['المنفذ', F.ports], ['نوع وحجم الحاوية', F.containerTypes], ['نوع المستند', F.docTypes], ['حالة المعاملة (نجمة)', ['*']]].filter(l => l[1].length);
     const L = 'ABCDEFG';
-    const ref = i => "'القوائم'!" + '$' + L[i] + '$2:$' + L[i] + '$' + (lists[i][1].length + 1);
-    const listOf = { shipStatus: 0, status: 1, origin: 2, port: 3, containerType: 4, docType: 5, linked: 6, doIssued: 6, needTelex: 6 };
-    const wide = { poNo: 14, status: 30, note: 34, shipAgent: 16, port: 26, blNo: 18, containerNo: 16 };
-    const dateKeys = ['statusDate', 'portEta', 'portDate', 'warehouseDate', 'emptyDate'];
-    const cols = I.KINDS.track.fields.map(f => ({ header: f.label, key: f.key, width: wide[f.key] || 14, input: f.key !== 'poNo', listRef: listOf[f.key] != null ? ref(listOf[f.key]) : undefined, listStrict: listOf[f.key] != null, fmt: dateKeys.includes(f.key) ? 'yyyy-mm-dd' : undefined }));
+    const ref = name => { const i = lists.findIndex(l => l[0] === name); return i < 0 ? undefined : "'القوائم'!" + '$' + L[i] + '$2:$' + L[i] + '$' + (lists[i][1].length + 1); };
+    const listOf = { shipStatus: 'حالة الشحنة', port: 'المنفذ', containerType: 'نوع وحجم الحاوية', docType: 'نوع المستند', fEX: 'حالة المعاملة (نجمة)', fDO: 'حالة المعاملة (نجمة)', fLK: 'حالة المعاملة (نجمة)', fSGP: 'حالة المعاملة (نجمة)' };
+    const wide = { poNo: 14, note: 34, shipAgent: 16, port: 26, blNo: 18, containerNo: 16, goods: 24, consig: 14 };
+    const dateKeys = ['statusDate', 'portDate', 'warehouseDate', 'emptyDate'];
+    const fields = I.KINDS.track.fields.filter(f => f.form !== false);
+    const txt = k => ((F.txStatuses || []).find(x => x.key === k) || {}).text;
+    const cols = fields.map(f => ({ header: f.flag ? (txt(f.key) || f.label) : f.label, key: f.key, width: f.flag ? 10 : (wide[f.key] || 14), input: f.key !== 'poNo', listRef: listOf[f.key] ? ref(listOf[f.key]) : undefined, listStrict: !!(listOf[f.key] && ref(listOf[f.key])), fmt: dateKeys.includes(f.key) ? 'yyyy-mm-dd' : undefined }));
     const maxLen = Math.max(...lists.map(l => l[1].length));
     const listRows = Array.from({ length: maxLen }, (_, i) => Object.fromEntries(lists.map((l, j) => ['c' + j, l[1][i] || ''])));
     const party = (db.parties || []).find(p => p.id === partyId);
     const company = db.settings.companyName || '';
     return { sheets: [
-      { name: 'تحديث المعاملات', title: 'نموذج تحديث المعاملات الجمركية' + (company ? ' — ' + company : '') + (party ? ' — ' + party.name : ''), subtitle: 'سطر لكل حاوية. الخانات الملونة تُختار من القائمة فقط. التواريخ بصيغة 2026-12-31. لا تغيّر رقم أمر الشراء، وأضف سطر لأي حاوية جديدة.', columns: cols, rows },
+      { name: 'تحديث المعاملات', title: 'نموذج تحديث المعاملات الجمركية' + (company ? ' — ' + company : '') + (party ? ' — ' + party.name : ''), subtitle: 'سطر لكل حاوية. الخانات الملونة تُختار من القائمة فقط. التواريخ بصيغة 2026-12-31. لا تغيّر رقم معاملة العميل، وأضف سطر لأي حاوية جديدة.', columns: cols, rows },
       { name: 'القوائم', columns: lists.map((l, j) => ({ header: l[0], key: 'c' + j, width: 28 })), rows: listRows },
       { name: 'تعليمات', columns: [{ header: 'التعليمات', key: 't', width: 110 }], rows: [
-        { t: '1. سطر لكل حاوية. إذا الشحنة فيها أكثر من حاوية، كرر رقم أمر الشراء والبوليصة في كل سطر.' },
-        { t: '2. «حالة الشحنة»: لم تصل / على الباخرة / وصلت الميناء.' },
-        { t: '3. «حالة المعاملة»: آخر حالة للمعاملة عندكم من القائمة، و«تاريخ الحالة» تاريخها.' },
-        { t: '4. «وصول المنفذ المتوقع» قبل الوصول، و«وصول المنفذ الفعلي» بعد الوصول.' },
-        { t: '5. «مطلوب تلكس منّا» = نعم إذا تنتظرون التلكس أو المستندات منّا.' },
-        { t: '6. عند تسليم الحاوية فارغة للوكيل اكتب تاريخها في «تاريخ تسليم الحاوية فارغة» وأرفقوا المستند.' },
+        { t: '1. سطر لكل حاوية. إذا الشحنة (أمر الشراء) فيها أكثر من حاوية، كرر رقم معاملة العميل والبوليصة في سطر لكل حاوية، واكتب «عدد الحاويات».' },
+        { t: '2. «حالة الشحنة»: لم تصل (بالطريق) / وصلت (في الميناء).' },
+        { t: '3. «حالة المعاملة»: حط نجمة (*) في أعمدة شحن (EX) / تسليم (DO) / ربط (LK) / مواني (SGP) اللي تمت — نفس تقريركم. و«تاريخ الحالة» تاريخ آخر تحديث.' },
+        { t: '4. «وصول المنفذ الفعلي» بعد وصول الشحنة للميناء — منه تبدأ أيام السماح للحاوية.' },
+        { t: '5. إذا تنتظرون التلكس أو المستندات منّا اكتبوا NEED TELEX في الملاحظات.' },
+        { t: '6. عند إرجاع الحاوية فارغة للوكيل اكتب تاريخها في «تاريخ إرجاع الحاوية فارغة» وأرفقوا المستند.' },
         { t: '7. لا تغيّر أسماء الأعمدة ولا ترتيبها.' }
       ] }
     ] };
@@ -2490,8 +2502,10 @@
     return `<div class="card"><h2>النموذج الموحد للمخلّصين — القوائم المنسدلة</h2>
       <div class="hint">هذي القيم اللي تطلع في قوائم النموذج. كل حالة مربوطة بمرحلة عندنا، فالاستيراد يحرّك المرحلة تلقائيًا. «محايدة» = تتسجل بدون تغيير المرحلة. <button class="link" data-act="tplTrack">تنزيل النموذج</button></div>
       ${statusTable('shipStatuses', 'حالة الشحنة')}
-      ${statusTable('txStatuses', 'حالة المعاملة')}
-      <div class="form f4" style="margin-top:12px">${listBox('origins', 'المنشأ')}${listBox('ports', 'المنفذ')}${listBox('containerTypes', 'نوع وحجم الحاوية')}${listBox('docTypes', 'نوع المستند')}</div>
+      <h3>حالة المعاملة — أعمدة النجمة (زي تقرير المخلّص)</h3><table class="t" style="max-width:760px"><thead><tr><th>العمود في النموذج</th><th>مرحلتنا إذا عليه نجمة</th></tr></thead><tbody>
+      ${F.txStatuses.map((x, i) => `<tr><td><input class="inp" style="width:280px" data-chg="cform" data-l="txStatuses" data-i="${i}" data-k="text" value="${esc(x.text)}"></td><td><select class="inp" data-chg="cform" data-l="txStatuses" data-i="${i}" data-k="stage">${stOpts(x.stage)}</select></td></tr>`).join('')}
+      </tbody></table><p class="small">أكثر من نجمة = تاخذ أبعد مرحلة. تقرير PDF من المخلّص (مثل الجنوبي) يقرأ نفس الأعمدة.</p>
+      <div class="form f4" style="margin-top:12px">${listBox('ports', 'المنفذ')}${listBox('containerTypes', 'نوع وحجم الحاوية')}${listBox('docTypes', 'نوع المستند')}</div>
       <button class="sm" data-act="cformReset" style="margin-top:8px">استرجاع القوائم الافتراضية</button>
     </div>`;
   }

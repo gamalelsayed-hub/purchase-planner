@@ -102,30 +102,36 @@
     },
     track: {
       title: 'تحديث المخلّص / الوكيل',
+      // ترتيب أعمدة النموذج الموحد. «form: false» = ما يطلع في النموذج، لكن ينقرأ لو موجود (نماذج قديمة)
       fields: [
-        { key: 'poNo', label: 'رقم أمر الشراء', aliases: ['رقم أمر الشراء', 'رقم الأمر', 'رقم الامر', 'امر الشراء', 'po'] },
+        { key: 'poNo', label: 'رقم معاملة العميل', aliases: ['رقم معاملة العميل', 'رقم أمر الشراء', 'رقم الأمر', 'رقم الامر', 'امر الشراء', 'po'] },
         { key: 'consig', label: 'رقم المعاملة لدى المخلّص', aliases: ['رقم المعاملة لدى المخلّص', 'رقم المعاملة لدى المخلص', 'رقم المعامله', 'رقم المعاملة', 'consig'] },
         { key: 'blNo', label: 'رقم البوليصة', aliases: ['رقم البوليصة', 'رقم البوليصه', 'البوليصة', 'بوليصة الشحن', 'bl', 'blno', 'b/l', 'رقم التلكس'] },
         { key: 'docType', label: 'نوع المستند', aliases: ['نوع المستند', 'نوع مستند الشحن', 'بوليصة او تلكس'] },
         { key: 'containerNo', label: 'رقم الحاوية', aliases: ['رقم الحاوية', 'الحاوية', 'container', 'containerno', 'cntr'] },
-        { key: 'containerType', label: 'نوع وحجم الحاوية', aliases: ['نوع وحجم الحاوية', 'نوع الحاوية', 'حجم الحاوية', 'عدد'] },
-        { key: 'shipAgent', label: 'وكيل الملاحة', aliases: ['وكيل الملاحة', 'الخط الملاحي', 'الوكيل', 'agent'] },
-        { key: 'origin', label: 'المنشأ', aliases: ['المنشأ', 'بلد المنشأ', 'coo'] },
+        { key: 'containerCount', label: 'عدد الحاويات', aliases: ['عدد الحاويات', 'عدد', 'qty'] },
+        { key: 'containerType', label: 'نوع وحجم الحاوية', aliases: ['نوع وحجم الحاوية', 'نوع الحاوية', 'حجم الحاوية'] },
+        { key: 'shipAgent', label: 'اسم الوكيل', aliases: ['اسم الوكيل', 'وكيل الملاحة', 'الخط الملاحي', 'الوكيل', 'agent'] },
+        { key: 'goods', label: 'وصف البضاعة', aliases: ['وصف البضاعة', 'وصف البضاعه', 'البضاعة', 'description of goods'] },
         { key: 'port', label: 'المنفذ', aliases: ['المنفذ', 'الميناء', 'منفذ الوصول', 'port'] },
         { key: 'shipStatus', label: 'حالة الشحنة', aliases: ['حالة الشحنة', 'status.n', 'حالة الوصول'] },
-        { key: 'status', label: 'حالة المعاملة', aliases: ['حالة المعاملة', 'الحالة', 'status'] },
         { key: 'statusDate', label: 'تاريخ الحالة', aliases: ['تاريخ الحالة', 'التاريخ', 'تاريخ التحديث', 'date'] },
-        { key: 'portEta', label: 'وصول المنفذ المتوقع', aliases: ['وصول المنفذ المتوقع', 'تاريخ الوصول المتوقع للمنفذ', 'eta'] },
         { key: 'portDate', label: 'وصول المنفذ الفعلي', aliases: ['وصول المنفذ الفعلي', 'تاريخ وصول الميناء', 'وصول الميناء', 'تاريخ الوصول', 'arrival'] },
         { key: 'bayan', label: 'رقم البيان الجمركي', aliases: ['رقم البيان الجمركي', 'البيان الجمركي', 'رقم البيان', 'bayan'] },
         { key: 'duties', label: 'الرسوم الجمركية', aliases: ['الرسوم الجمركية', 'الرسوم', 'duties'] },
-        { key: 'opsFee', label: 'رسوم العمليات', aliases: ['رسوم العمليات', 'عمليات', 'مصاريف التخليص'] },
-        { key: 'linked', label: 'تم الربط', aliases: ['تم الربط', 'ربط', 'lk'] },
-        { key: 'doIssued', label: 'إذن التسليم', aliases: ['إذن التسليم', 'اذن التسليم', 'تسليم', 'do'] },
-        { key: 'needTelex', label: 'مطلوب تلكس منّا', aliases: ['مطلوب تلكس منّا', 'مطلوب تلكس منا', 'مطلوب تلكس', 'need telex'] },
         { key: 'warehouseDate', label: 'تاريخ الوصول للمستودع', aliases: ['تاريخ الوصول للمستودع', 'وصول المستودع', 'تاريخ التسليم للمستودع'] },
-        { key: 'emptyDate', label: 'تاريخ تسليم الحاوية فارغة', aliases: ['تاريخ تسليم الحاوية فارغة', 'تسليم الفارغ', 'إرجاع الحاوية', 'empty return'] },
-        { key: 'note', label: 'ملاحظات', aliases: ['ملاحظات', 'ملاحظة', 'note'] }
+        { key: 'emptyDate', label: 'تاريخ إرجاع الحاوية فارغة', aliases: ['تاريخ إرجاع الحاوية فارغة', 'تاريخ ارجاع الحاوية فارغة', 'تاريخ تسليم الحاوية فارغة', 'تسليم الفارغ', 'إرجاع الحاوية', 'empty return'] },
+        { key: 'note', label: 'ملاحظات', aliases: ['ملاحظات', 'ملاحظة', 'note'] },
+        // حالة المعاملة = أعمدة النجمة زي تقرير المخلّص: نجمة (*) في العمود = المعاملة وصلت هذي المرحلة
+        { key: 'fEX', label: 'شحن (EX)', aliases: ['شحن (EX)', 'شحن', 'ex'], flag: true },
+        { key: 'fDO', label: 'تسليم (DO)', aliases: ['تسليم (DO)', 'تسليم', 'do', 'إذن التسليم', 'اذن التسليم'], flag: true },
+        { key: 'fLK', label: 'ربط (LK)', aliases: ['ربط (LK)', 'ربط', 'lk', 'تم الربط'], flag: true },
+        { key: 'fSGP', label: 'مواني (SGP)', aliases: ['مواني (SGP)', 'مواني', 'موانى', 'sgp'], flag: true },
+        { key: 'origin', label: 'المنشأ', aliases: ['المنشأ', 'بلد المنشأ', 'coo'], form: false },
+        { key: 'status', label: 'حالة المعاملة', aliases: ['حالة المعاملة', 'الحالة', 'status'], form: false },
+        { key: 'portEta', label: 'وصول المنفذ المتوقع', aliases: ['وصول المنفذ المتوقع', 'تاريخ الوصول المتوقع للمنفذ', 'eta'], form: false },
+        { key: 'opsFee', label: 'رسوم العمليات', aliases: ['رسوم العمليات', 'عمليات', 'مصاريف التخليص'], form: false },
+        { key: 'needTelex', label: 'مطلوب تلكس منّا', aliases: ['مطلوب تلكس منّا', 'مطلوب تلكس منا', 'مطلوب تلكس', 'need telex'], form: false }
       ]
     },
     transit: {
@@ -503,6 +509,7 @@
   const isSerialDate = v => typeof v === 'number' && v > 40000 && v < 60000;
   const serialToIso = v => new Date(Math.round((v - 25569) * 86400000)).toISOString().slice(0, 10);
   function isClearerReport(sheets) {
+    if (sheets.some(sh => sh.clearerPdf)) return true;
     // تقرير المخلّص (Crystal): فيه البوليصة والحاوية + علامة خاصة به (مسلسل / بيان المعاملات / Status.N).
     // نموذجنا الموحد فيه «رقم أمر الشراء» كعمود ← مو تقرير مخلّص.
     return sheets.some(sh => {
@@ -514,6 +521,8 @@
     });
   }
   function parseClearerReport(sheets, db) {
+    const pdf = sheets.find(sh => sh.clearerPdf);
+    if (pdf) return parseClearerPdf(pdf.clearerPdf, db);
     const sh = sheets.find(s => s.rows.slice(0, 40).some(r => norm((r || []).join(' ')).includes(norm('رقم الحاوية'))));
     const rows = sh.rows;
     const hdrIdx = rows.findIndex(r => norm((r || []).join(' ')).includes(norm('رقم الحاوية')));
@@ -532,7 +541,7 @@
       if (contCell) rec.containers = (contCell.v.match(CONT_RE) || []).map(x => x.replace(/\s+/g, '').toUpperCase());
       const cc = contCell ? contCell.c : 34;
       const latin = cs.filter(x => typeof x.v === 'string' && /^[A-Za-z][A-Za-z .]*$/.test(x.v));
-      const st = latin.find(x => x.c < cc - 4); if (st) rec.statuses.push(st.v);
+      const st = latin.find(x => x.c < cc - 4); if (st) { rec.statuses.push(st.v); rec.extra.terminal = st.v; }
       const ag = latin.find(x => x.c > cc && x.c < cc + 8 && x !== st); if (ag) rec.extra.agent = ag.v;
       const bl = cs.find(x => typeof x.v === 'string' && x.c > cc && /\d/.test(x.v) && /[A-Za-z]/.test(x.v) && !/^\d+\s*x\s*\d+/i.test(x.v) && x !== contCell && !CONT_RE.test(x.v)); CONT_RE.lastIndex = 0;
       if (bl) rec.blNo = bl.v;
@@ -570,19 +579,44 @@
     }
     return out;
   }
+  // تقرير المخلّص PDF (بيان المعاملات تحت التخليص): الحقول جاهزة من قارئ PDF ← نفس شكل سجلات تقرير Excel
+  function parseClearerPdf(list, db) {
+    const known = new Set(Object.keys((db.po && db.po.orders) || {}));
+    const d = v => { const m = String(v || '').match(/(\d{4})\/(\d{1,2})\/(\d{1,2})/); return m ? m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0') : ''; };
+    const n = v => { const x = parseFloat(String(v || '').replace(/[^\d.\-]/g, '')); return isFinite(x) ? x : undefined; };
+    return list.map(x => {
+      const note = String(x.desc || '').trim();
+      const rec = { containers: [], statuses: [], extra: {}, note };
+      rec.containers = (String(x.container || '').match(CONT_RE) || []).map(c => c.replace(/\s+/g, '').toUpperCase()); CONT_RE.lastIndex = 0;
+      if (x.terminal) rec.statuses.push(x.terminal);
+      if (x.status) rec.statuses.push(x.status);
+      for (const f of x.flags || []) rec.statuses.push(f);
+      if (x.bl) rec.blNo = String(x.bl).trim();
+      if (d(x.eta)) rec.portEta = d(x.eta);
+      // الحروف العربية في PDF المدوّر تطلع مبعثرة: المنفذ نتعرف عليه بكلمات مميزة
+      const ar = String((x.port || '') + ' ' + (x.eta || '')).replace(/[^\u0600-\u06FF]/g, '');
+      const port = /جد[ةه]/.test(ar) ? 'ميناء جدة الإسلامي' : /دمام/.test(ar) ? 'ميناء الملك عبدالعزيز بالدمام' : /رابغ/.test(ar) ? 'ميناء الملك عبدالله رابغ' : /جازان/.test(ar) ? 'ميناء جازان' : /بطحاء/.test(ar) ? 'منفذ البطحاء' : /حديث/.test(ar) ? 'منفذ الحديثة' : /(رض|رياض|جاف|جلاف)/.test(ar) ? 'ميناء الرياض الجاف' : (x.port || '').replace(/[^\u0600-\u06FF ]/g, '').trim();
+      const coo = String(x.coo || '').replace(/\s+/g, '').replace(/^الصني$/, 'الصين');
+      Object.assign(rec.extra, { terminal: x.terminal || undefined, consig: x.consig ? String(x.consig) : undefined, qty: x.qty || undefined, agent: x.agent || undefined, origin: coo || undefined, port: port || undefined,
+        bayan: x.bayan ? String(x.bayan) : undefined, duties: n(x.duties), opsFee: n(x.ops), secondDate: d(x.dam) || undefined, flags: x.flags || [] });
+      Object.keys(rec.extra).forEach(k => rec.extra[k] === undefined && delete rec.extra[k]);
+      rec.extra.needTelex = /need+\s*telex/i.test(note) && !/تم\s*ارسال\s*التلكس/.test(note);
+      const ns = (note.replace(/[٠-٩]/g, c => '٠١٢٣٤٥٦٧٨٩'.indexOf(c)).match(/\d{4,7}/g) || []);
+      rec.poNo = ns.find(v => known.has(v)) || ns[0] || '';
+      return rec;
+    });
+  }
   // النموذج الموحد للمخلّصين: القوائم المنسدلة الثابتة (تتعدل من الإعدادات). كل حالة مربوطة بمرحلة عندنا.
+  // أعمدة النجمة (حالة المعاملة) ومرحلتها عندنا — بنفس ترتيب تقرير المخلّص
+  const FLAG_COLS = [['fEX', 'شحن (EX)', 'released'], ['fDO', 'تسليم (DO)', 'toClearer'], ['fLK', 'ربط (LK)', 'customs'], ['fSGP', 'مواني (SGP)', 'customs']];
   function defaultClearerForm() {
     return {
-      shipStatuses: [{ text: 'لم تصل', stage: 'shipped' }, { text: 'على الباخرة', stage: 'shipped' }, { text: 'وصلت الميناء', stage: 'port' }],
-      txStatuses: [
-        { text: 'إنتظار', stage: '__none' }, { text: 'بانتظار المستندات / التلكس منّا', stage: '__none' }, { text: 'استلمنا المستندات', stage: 'toClearer' },
-        { text: 'تم الربط مع الوكيل', stage: 'customs' }, { text: 'تم تقديم البيان الجمركي', stage: 'customs' }, { text: 'تحصيل رسوم', stage: 'customs' },
-        { text: 'فحص / معاينة', stage: 'customs' }, { text: 'تم الفسح', stage: 'released' }, { text: 'جاري النقل', stage: 'released' },
-        { text: 'تم النقل للمستودع', stage: 'warehouse' }, { text: 'تم تسليم الحاوية فارغة', stage: 'emptyReturned' }
-      ],
-      origins: ['الصين', 'الهند', 'تركيا', 'مصر', 'الإمارات', 'فيتنام', 'ماليزيا', 'إندونيسيا', 'تايلاند', 'إيطاليا', 'إسبانيا', 'ألمانيا', 'أخرى'],
-      ports: ['ميناء جدة الإسلامي', 'ميناء الملك عبدالعزيز بالدمام', 'ميناء الملك عبدالله', 'ميناء الجبيل التجاري', 'منفذ البطحاء', 'منفذ الحديثة', 'مطار الملك خالد', 'أخرى'],
-      containerTypes: ['20 جاف', '20 مبرد', '40 جاف', '40 مبرد', '40 HC', '45 HC', 'طرود (LCL)'],
+      v: 2,
+      shipStatuses: [{ text: 'لم تصل (بالطريق)', stage: 'shipped' }, { text: 'وصلت (في الميناء)', stage: 'port' }],
+      txStatuses: FLAG_COLS.map(([key, text, stage]) => ({ key, text, stage })),
+      origins: [],
+      ports: ['ميناء جدة الإسلامي', 'ميناء الملك عبدالعزيز بالدمام', 'ميناء الملك عبدالله رابغ', 'منفذ البطحاء', 'منفذ الحديثة', 'ميناء جازان', 'ميناء الرياض الجاف'],
+      containerTypes: ['20 قدم', '40 قدم'],
       docTypes: ['بوليصة', 'تلكس'],
       yesNo: ['نعم', 'لا']
     };
@@ -602,6 +636,8 @@
     const form = db.clearerForm || {};
     const maps = [].concat((party && party.statusMap) || [], db.trackStatusMap || [], form.shipStatuses || [], form.txStatuses || []);
     for (const m of maps) if (m.text && m.stage && norm(m.text) === t) return m.stage;
+    const bare = x => norm(String(x).replace(/\([^)]*\)/g, '')).replace(/\s+/g, '');
+    for (const m of maps) if (m.text && m.stage && bare(m.text) === bare(text)) return m.stage;
     // الحالات الافتراضية لتقارير المخلّص (إذا ما عُرّفت في الجداول)
     for (const m of DEFAULT_CLEARER_MAP) if (norm(m.text) === t && !maps.some(x => norm(x.text) === t)) return m.stage;
     for (const m of maps) if (m.text && m.stage && (t.includes(norm(m.text)) || norm(m.text).includes(t))) return m.stage;
@@ -637,13 +673,17 @@
       }
       if (!conts.length) { const pd = toDate(r.portDate); if (pd) o.track.portAt = pd; }
       // النموذج الموحد: حالتين (الشحنة + المعاملة) وبيانات إضافية
-      if (!r.statuses && (r.shipStatus != null || r.status != null)) r.statuses = [r.shipStatus, r.status].filter(x => x != null && String(x).trim());
-      const yes = v => /^(نعم|yes|y|1|✓|\*)$/i.test(String(v == null ? '' : v).trim());
-      const formKeys = ['consig', 'docType', 'containerType', 'shipAgent', 'origin', 'port', 'bayan', 'duties', 'opsFee', 'linked', 'doIssued', 'needTelex'];
+      const yes = v => /^(نعم|yes|y|1|✓|\*|•|●|x)$/i.test(String(v == null ? '' : v).trim());
+      const formFlags = FLAG_COLS.filter(([k]) => yes(r[k])).map(([k]) => (((db.clearerForm || {}).txStatuses || []).find(x => x.key === k) || {}).text || FLAG_COLS.find(f => f[0] === k)[1]);
+      if (!r.statuses && (r.shipStatus != null || r.status != null || formFlags.length)) r.statuses = [r.shipStatus, r.status].filter(x => x != null && String(x).trim()).concat(formFlags);
+      const formKeys = ['note', 'consig', 'docType', 'containerType', 'containerCount', 'shipAgent', 'goods', 'origin', 'port', 'bayan', 'duties', 'opsFee', 'linked', 'doIssued', 'needTelex', 'fEX', 'fDO', 'fLK', 'fSGP'];
       if (!r.extra && formKeys.some(k => r[k] != null && String(r[k]).trim() !== '')) {
         r.extra = { consig: r.consig ? String(r.consig) : undefined, agent: r.shipAgent || undefined, origin: r.origin || undefined, port: r.port || undefined, bayan: r.bayan ? String(r.bayan) : undefined,
           duties: r.duties != null && r.duties !== '' ? num(r.duties) : undefined, opsFee: r.opsFee != null && r.opsFee !== '' ? num(r.opsFee) : undefined,
-          flags: [yes(r.linked) ? 'ربط' : '', yes(r.doIssued) ? 'تسليم' : ''].filter(Boolean), needTelex: yes(r.needTelex) };
+          terminal: r.shipStatus ? String(r.shipStatus).trim() : undefined,
+          qty: r.containerCount != null && String(r.containerCount).trim() !== '' ? String(r.containerCount).trim() : undefined, goods: r.goods ? String(r.goods).trim() : undefined,
+          flags: [...new Set(formFlags.map(f => String(f).replace(/\s*\([^)]*\)/, '')).concat([yes(r.linked) ? 'ربط' : '', yes(r.doIssued) ? 'تسليم' : '']).filter(Boolean))],
+          needTelex: yes(r.needTelex) || /need+\s*telex/i.test(String(r.note || '')) && !/تم\s*ارسال\s*التلكس/.test(String(r.note || '')) };
         Object.keys(r.extra).forEach(k => r.extra[k] === undefined && delete r.extra[k]);
         if (r.portEta && !/^\d{4}-\d{2}-\d{2}$/.test(String(r.portEta))) r.portEta = toDate(r.portEta);
       }
@@ -792,7 +832,7 @@
     if (/يورو|eur/i.test(t)) return 'EUR';
     return '';
   }
-  const Importers = { defaultClearerForm, isClearerReport, parseClearerReport, DEFAULT_CLEARER_MAP, applyTrack, mapTrackStatus, currencyFromHeader, KINDS, applyPOs, applyPOPay, toDate, curCode, detectHeader, rowsToRecords, applyItems, applySales, applyStock, applyTransit, autoAddItems, importLegacy, isLegacyWorkbook, syncGroups, parseActive };
+  const Importers = { FLAG_COLS, parseClearerPdf, defaultClearerForm, isClearerReport, parseClearerReport, DEFAULT_CLEARER_MAP, applyTrack, mapTrackStatus, currencyFromHeader, KINDS, applyPOs, applyPOPay, toDate, curCode, detectHeader, rowsToRecords, applyItems, applySales, applyStock, applyTransit, autoAddItems, importLegacy, isLegacyWorkbook, syncGroups, parseActive };
   if (typeof module !== 'undefined' && module.exports) module.exports = Importers;
   else root.Importers = Importers;
 })(typeof window !== 'undefined' ? window : globalThis);
