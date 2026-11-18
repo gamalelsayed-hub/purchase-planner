@@ -207,6 +207,10 @@
       for (const u of d.users) if (Array.isArray(u.pages)) { if (u.pages.includes('ship') && !u.pages.includes('po')) u.pages.push('po'); u.pages = u.pages.filter(x => x !== 'ship'); }
       d.meta.planV = 1;
     }
+    // قائمة المخازن (رقم ← اسم) — تبدأ من أرقام المخازن الموجودة في أوامر الشراء
+    if (!Array.isArray(d.warehouses)) d.warehouses = [{ code: '1002', name: 'المركزي' }, { code: '1101', name: 'الخمرة' }, { code: '1201', name: 'الرياض' }];
+    for (const o of Object.values((d.po && d.po.orders) || {})) for (const l of o.lines || []) { const c = String(l.warehouse || '').trim(); if (c && !d.warehouses.some(w => w.code === c)) d.warehouses.push({ code: c, name: '' }); }
+    d.warehouses.sort((a, b) => a.code.localeCompare(b.code));
     // «قائمة المدخلات» صارت قسم يتحدد للمستخدم — كل من كان يشوفها يبقى يشوفها
     if ((d.meta.inputsV || 0) < 1) {
       for (const u of d.users) if (Array.isArray(u.pages) && u.pages.length && !u.pages.includes('inputs')) u.pages.push('inputs');
@@ -418,12 +422,12 @@
     delMonth: 'import_data', clearTransit: 'import_data', delTransit: 'import_data', addTransit: 'import_data',
     importLegacy: 'data_admin', restoreBackup: 'data_admin', resetAll: 'data_admin', archDel: 'data_admin', chooseShared: 'data_admin', resetDataDir: 'data_admin',
     approve: 'approve',
-    addType: 'settings', delType: 'settings', addExc: 'settings', delExc: 'settings', addGroup: 'settings', renGroup: 'settings', delGroup: 'settings',     addCur: 'settings', delCur: 'settings', stgMove: 'settings', stgDel: 'settings', stgAdd: 'settings', stgReset: 'settings', cformAdd: 'settings', cformDel: 'settings', cformReset: 'settings', tplTrack: 'export', partyAdd: 'shipping', partyDel: 'shipping', partyMap: 'shipping', shipNext: 'shipping',
+    addType: 'settings', delType: 'settings', addExc: 'settings', delExc: 'settings', addGroup: 'settings', renGroup: 'settings', delGroup: 'settings',     addCur: 'settings', delCur: 'settings', addWh: 'settings', delWh: 'settings', stgMove: 'settings', stgDel: 'settings', stgAdd: 'settings', stgReset: 'settings', cformAdd: 'settings', cformDel: 'settings', cformReset: 'settings', tplTrack: 'export', partyAdd: 'shipping', partyDel: 'shipping', partyMap: 'shipping', shipNext: 'shipping',
     addUser: 'users', editUser: 'users',
     pgExcel: 'export', pgPdf: 'export', pgPrint: 'export', tpl: 'export', tplItemsFull: 'export', exportBackup: 'export',
     poReceive: 'po_import', poReopen: 'po_import', clearManualTransit: 'import_data', poQuickRecv: 'po_import', poQuickShip: 'po_import', poQuickPay: 'po_payments', poNew: 'po_payments', ratesOk: 'settings'
   };
-  const CHG_PERM = { cform: 'settings', cformList: 'settings', stg: 'settings', party: 'shipping', adj: 'adjust', reason: 'adjust', stockDate: 'import_data', set: 'settings', setBool: 'settings', setPct: 'settings', type: 'settings', cls: 'settings', exc: 'settings', cur: 'settings' };
+  const CHG_PERM = { wh: 'settings', cform: 'settings', cformList: 'settings', stg: 'settings', party: 'shipping', adj: 'adjust', reason: 'adjust', stockDate: 'import_data', set: 'settings', setBool: 'settings', setPct: 'settings', type: 'settings', cls: 'settings', exc: 'settings', cur: 'settings' };
   const IMPORT_PERM = { track: 'shipping', items: 'items', sales: 'import_data', stock: 'import_data', transit: 'import_data', po: 'po_import', poPay: 'po_payments' };
 
   function pageAuth() {
@@ -1355,8 +1359,10 @@
       });
     });
   }
+  const whName = c => { const w = (db.warehouses || []).find(x => x.code === String(c).trim()); return w && w.name ? `${w.name} (${w.code})` : String(c).trim(); };
+  const whLabel = v => String(v || '').split('، ').filter(Boolean).map(whName).join('، ');
   const mfValue = (g, o) => g === 'main' ? [o.mainStatus] : g === 'stage' ? [o.stageName || '— محلي (بدون مراحل) —'] : g === 'fw' ? [o.forwarder || '— بدون —'] : g === 'cl' ? [o.clearer || '— بدون —'] :
-    g === 'sup' ? [o.supplier || '— بدون —'] : g === 'cc' ? [o.costCenter || '— بدون —'] : g === 'wh' ? (o.warehouse ? o.warehouse.split('، ') : ['— بدون —']) : g === 'pay' ? [o.payStatus] : g === 'cur' ? [curName(o.currency)] : g === 'shipc' ? [num(o.shipping) > 0 ? 'الشحن مسجّل' : 'الشحن فارغ'] : g === 'pod' ? [o.poDate ? 'تاريخ الأمر موجود' : 'تاريخ الأمر فارغ'] : g === 'bl' ? [String(o.blNo || '').trim() ? 'البوليصة موجودة' : 'البوليصة فارغة'] : g === 'alert' ? o.alerts : [];
+    g === 'sup' ? [o.supplier || '— بدون —'] : g === 'cc' ? [o.costCenter || '— بدون —'] : g === 'wh' ? (o.warehouse ? o.warehouse.split('، ').map(whName) : ['— بدون —']) : g === 'pay' ? [o.payStatus] : g === 'cur' ? [curName(o.currency)] : g === 'shipc' ? [num(o.shipping) > 0 ? 'الشحن مسجّل' : 'الشحن فارغ'] : g === 'pod' ? [o.poDate ? 'تاريخ الأمر موجود' : 'تاريخ الأمر فارغ'] : g === 'bl' ? [String(o.blNo || '').trim() ? 'البوليصة موجودة' : 'البوليصة فارغة'] : g === 'alert' ? o.alerts : [];
   function masterRows(except) {
     const f = mfState(), q = (f.q || '').trim().toLowerCase();
     return masterAll().filter(o => {
@@ -1389,7 +1395,7 @@
     { k: 'mainStatus', h: 'الحالة', def: true, v: o => E.MAIN_STATUSES.indexOf(o.mainStatus), f: o => mainPill(o) },
     { k: 'stageIdx', h: 'المرحلة', def: true, v: o => o.stageIdx, f: o => o.foreign ? trackPill(o.trackPill) + (o.daysIn != null && !o.closed ? ` <span class="small" style="${o.late ? 'color:var(--bad);font-weight:700' : ''}">${fmt(o.daysIn)}/${fmt(o.stageDays || 0)} يوم</span>` : '') : '<span class="small">محلي</span>' },
     { k: 'poDate', h: 'تاريخ الأمر', def: true },
-    { k: 'supplier', h: 'المورد', def: true }, { k: 'costCenter', h: 'مركز التكلفة (كما في النظام)', cls: 'wrap' }, { k: 'warehouse', h: 'المخزن', def: true }, { k: 'forwarder', h: 'CO', def: true }, { k: 'clearer', h: 'المخلّص', def: true },
+    { k: 'supplier', h: 'المورد', def: true }, { k: 'costCenter', h: 'مركز التكلفة (كما في النظام)', cls: 'wrap' }, { k: 'warehouse', h: 'المخزن', def: true, v: o => whLabel(o.warehouse) }, { k: 'forwarder', h: 'CO', def: true }, { k: 'clearer', h: 'المخلّص', def: true },
     { k: 'blNo', h: 'البوليصة', def: true, f: o => esc(o.blNo) + (o.docType ? ` <span class="small">(${esc(o.docType)})</span>` : '') },
     { k: 'containers', h: 'الحاويات', def: true, v: o => o.containers.map(c => c.no).join(' '), f: o => o.containers.length ? `${fmt(o.containers.length)} <span class="small">(${fmt(o.containersOpen)} لم تُسلّم)</span>` : '' },
     { k: 'demurrageLeft', h: 'أيام السماح', def: true, n: true, f: o => demCell(o) },
@@ -2125,6 +2131,13 @@
       </tbody></table></div>
     </div>
 
+    <div class="card"><h2>المخازن</h2>
+      <div class="hint">رقم المخزن يجي من تقرير أوامر الشراء، واكتب اسمه هنا عشان يطلع في القائمة والفلتر بالاسم. أي مخزن جديد في التقرير ينضاف هنا لحاله.</div>
+      <table class="t" style="margin-top:8px;max-width:620px"><thead><tr><th>رقم المخزن</th><th>اسم المخزن</th><th class="n">أوامر مفتوحة</th><th></th></tr></thead><tbody>
+      ${(db.warehouses || []).map((w, i) => `<tr><td><input class="inp" style="width:90px" data-chg="wh" data-i="${i}" data-k="code" value="${esc(w.code)}"></td><td><input class="inp" style="width:260px" data-chg="wh" data-i="${i}" data-k="name" value="${esc(w.name || '')}" placeholder="مثال: مستودع جدة"></td>
+        <td class="n">${fmt(Object.values(db.po.orders).filter(o => o.status === 'open' && (o.lines || []).some(l => String(l.warehouse || '').trim() === w.code)).length)}</td><td><button class="sm danger" data-act="delWh" data-i="${i}">حذف</button></td></tr>`).join('') || '<tr><td colspan="4" class="muted">لا توجد مخازن بعد — تنضاف من تقرير أوامر الشراء</td></tr>'}
+      </tbody></table><button class="sm" data-act="addWh" style="margin-top:8px">+ إضافة مخزن</button></div>
+
     <div class="card"><h2>العملات وأسعار الصرف (لأوامر الشراء والكاش)</h2>
       <div class="hint">كل المبالغ تتحول للعملة الأساسية (${esc(cur())}) بسعر الصرف هنا. تقدر تحدد سعر صرف خاص لأمر معيّن من شاشة الأمر.</div>
       <table class="t" style="margin-top:8px;max-width:620px"><thead><tr><th>الرمز</th><th>الاسم</th><th>سعر الصرف (= كم ${esc(cur())})</th><th></th></tr></thead><tbody>
@@ -2802,6 +2815,8 @@
       it.units.push({ name: unit, factor: f }); log(`تعريف وحدة ${unit}=${f} للصنف ${code}`); commit();
     },
     addType: () => { db.types.push({ name: 'نوع جديد', leadTime: 1, extraMonths: 0, note: '', currency: db.currencies[0].code }); commit(); },
+    addWh: () => { db.warehouses = db.warehouses || []; db.warehouses.push({ code: '', name: '' }); commit(); },
+    delWh: el => { db.warehouses.splice(+el.dataset.i, 1); commit(); },
     addCur: () => { db.currencies.push({ code: 'EUR', name: 'يورو', rate: 4 }); commit(); },
     delCur: el => { db.currencies.splice(+el.dataset.i, 1); commit(); },
     delType: async el => {
@@ -2970,6 +2985,10 @@
       const x = db.parties[+el.dataset.i], key = el.dataset.k;
       if (key === 'freeDays') x.freeDays = el.value === '' ? null : num(el.value); else x[key] = el.value.trim();
       return commit();
+    }
+    if (k === 'wh') {
+      const w = db.warehouses[+el.dataset.i]; w[el.dataset.k] = el.value.trim();
+      log(`المخزن ${w.code}: ${w.name}`); return commit();
     }
     if (k === 'cur') {
       const c = db.currencies[+el.dataset.i], key = el.dataset.k;

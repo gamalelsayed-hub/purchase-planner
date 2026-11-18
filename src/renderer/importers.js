@@ -413,6 +413,8 @@
       // المخزن ومركز التكلفة (الأكثر تكرارًا بين أسطر الأمر)، ورسوم الشحن والمخلّص إذا موجودة في التقرير
       const whs = [...new Set(o.lines.map(l => l.warehouse).filter(Boolean))];
       if (whs.length) o.warehouse = whs.join('، ');
+      db.warehouses = db.warehouses || [];
+      for (const c of whs) if (!db.warehouses.some(w => w.code === c)) db.warehouses.push({ code: c, name: '' });
       const cc = mostCommon(o.lines.map(l => l.costCenter).filter(c => !/^مركز عام/.test(c))) || mostCommon(o.lines.map(l => l.costCenter));
       if (cc) o.costCenter = cc;
       // أمر عن طريق مكتب استيراد = خارجي بالدولار، ومكتب الاستيراد يتسجل عليه (إلا إذا العملة اتغيرت يدويًا)
