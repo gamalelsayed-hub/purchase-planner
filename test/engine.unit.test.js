@@ -292,8 +292,14 @@ assert.strictEqual(db.po.orders.K1.track.stage, 'emptyReturned'); assert.ok(db.p
   assert.strictEqual(R3.shipping, 9000, 'real shipping kept when cost center already has its code');
   const cl = d4.parties.find(p => p.kind === 'clearer' && p.name === 'برق المحيط');
   assert.ok(cl, 'clearer party created'); assert.strictEqual(R1.track.clearer, cl.id);
+  // مركز التكلفة = مكتب الاستيراد: يتسجل وكيل باسم مختصر، والأمر يصير خارجي بعملة الاستيراد (الدولار)
+  const fw = d4.parties.find(p => p.kind === 'forwarder' && p.name === 'نايف محمد 9011');
+  assert.ok(fw, 'import office party created from cost center'); assert.strictEqual(R1.track.forwarder, fw.id);
+  assert.strictEqual(R1.currency, 'USD'); assert.ok(E.isForeign(d4, R1));
+  assert.ok(!d4.parties.some(p => /مركز عام/.test(p.name)), 'general cost center is not an import office');
   I.applyPOs(d4, I.rowsToRecords(rows, dh.row, dh.map, 'poNo'), { date: '2026-03-11' });
   assert.strictEqual(d4.parties.filter(p => p.name === 'برق المحيط').length, 1, 'no duplicate party on re-import');
+  assert.strictEqual(d4.parties.filter(p => p.kind === 'forwarder').length, 3, 'one office per cost center, no duplicates');
 }
 
 console.log('✓ all engine unit tests passed');

@@ -359,6 +359,18 @@
     if (!p) { p = { id: 'P' + Date.now() + Math.random().toString(36).slice(2, 6), kind, name: nm, contact: '', phone: '', email: '', freeDays: null, statusMap: [] }; db.parties.push(p); }
     return p.id;
   }
+  // مركز التكلفة في النظام = مكتب الاستيراد (ما عدا «مركز عام»): يتسجل كوكيل/مكتب استيراد باسم مختصر («نايف محمد 9011»)
+  const isImportOffice = cc => !!String(cc || '').trim() && !/^مركز عام/.test(String(cc).trim());
+  const officeName = cc => String(cc || '').replace(/^\s*(موردون|موردين)\s+خارجي(ون|ين)\s*-?\s*/, '').trim() || String(cc).trim();
+  function ensureOffice(db, cc) {
+    db.parties = db.parties || [];
+    let p = db.parties.find(x => x.kind === 'forwarder' && (x.costCenter === cc || norm(x.name) === norm(officeName(cc))));
+    if (!p) { ensureParty(db, 'forwarder', officeName(cc)); p = db.parties[db.parties.length - 1]; }
+    if (!p.costCenter) p.costCenter = cc;
+    return p.id;
+  }
+  // عملة الاستيراد = أول عملة أجنبية مستخدمة في أنواع الأصناف (الدولار)
+  const importCurrency = db => { const base = ((db.currencies || [])[0] || {}).code || 'SAR'; const t = (db.types || []).find(x => x.currency && x.currency !== base); return t ? t.currency : ((db.currencies || []).find(c => c.code !== base) || {}).code || ''; };
   const mostCommon = arr => { const m = new Map(); arr.filter(Boolean).forEach(v => m.set(v, (m.get(v) || 0) + 1)); return [...m].sort((a, b) => b[1] - a[1]).map(x => x[0])[0] || ''; };
   function applyPOs(db, recs, { date, user, file } = {}) {
     const po = ensurePo(db);
@@ -397,6 +409,13 @@
       if (whs.length) o.warehouse = whs.join('، ');
       const cc = mostCommon(o.lines.map(l => l.costCenter).filter(c => !/^مركز عام/.test(c))) || mostCommon(o.lines.map(l => l.costCenter));
       if (cc) o.costCenter = cc;
+      // أمر عن طريق مكتب استيراد = خارجي بالدولار، ومكتب الاستيراد يتسجل عليه (إلا إذا العملة اتغيرت يدويًا)
+      if (isImportOffice(o.costCenter)) {
+        o.track = o.track || { history: [], containers: [] };
+        o.track.forwarder = ensureOffice(db, o.costCenter);
+        const ic = importCurrency(db);
+        if (ic && !first.currency && !o.currencyManual) o.currency = ic;
+      }
       const ships = lines.map(l => l._r._ship).filter(v => v != null && v > 0);
       if (ships.length) { const uniq = [...new Set(ships)]; o.shipping = uniq.length === 1 ? uniq[0] : uniq.reduce((a, v) => a + v, 0); }
       const cl = mostCommon(lines.map(l => String(l._r.clearer || '').trim()));
