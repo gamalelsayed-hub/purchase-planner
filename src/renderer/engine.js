@@ -526,13 +526,11 @@
   }
   // الخطة التراكمية للأمر: كل مرحلة مخططها = تاريخ الأمر + مجموع مدد المراحل قبلها.
   // الفعلي من سجل التحديثات، والمتوقع للمراحل الباقية ينزاح من آخر تاريخ فعلي (ولا يكون قبل اليوم).
-  // الأوراق مستلمة؟ يدوي (استلمنا / ما استلمنا) يغلب، وإلا: مرفق بوليصة/تلكس، أو وصل مرحلة الأوراق والمخلّص ما ينتظر التلكس منّا
-  function docsOf(o, reached) {
-    if (o.docsManual === 'yes') return true;
-    if (o.docsManual === 'no') return false;
-    if ((o.attachments || []).some(a => /بوليصة|تلكس/.test(a.kind || ''))) return true;
-    return !!reached && !(o.track && o.track.needTelex);
-  }
+  // الطريقة المعتمدة للحالة الرئيسية:
+  //  مشحون = الأمر قدامه مبلغ في «رسوم الشحن» (من تقرير أوامر الشراء)
+  //  استلمنا الأوراق = المحاسب علّم «استلمنا الأوراق» — ولا شي غيره (لا المرحلة ولا التلكس ولا المرفقات)
+  const isShipped = o => num(o.shipping) > 0;
+  function docsOf(o) { return o.docsManual === 'yes'; }
   function poPlan(db, o, todayIso) {
     const today = todayIso || new Date().toISOString().slice(0, 10);
     const st = db.shipStages || [];
@@ -561,7 +559,7 @@
     const eta = recvIdx < 0 ? '' : (cur >= recvIdx ? (actual[recvIdx] || anchor) : forecast[recvIdx]);
     const planEta = recvIdx >= 0 ? planned[recvIdx] : '';
     const daysIn = dayDiff(today, anchor);
-    const docs = docsOf(o, docsIdx >= 0 && cur >= docsIdx);
+    const docs = docsOf(o);
     return {
       base, durs, planned, actual, forecast, cur, anchor, daysIn, closed,
       late: !closed && durs[cur] > 0 && daysIn > durs[cur],
@@ -583,14 +581,15 @@
     return d;
   }
   function poExpectedShip(db, o) { const d = poPrepDays(db, o); return d > 0 ? addDaysDate(o.poDate || o.firstSeen, d) : ''; }
-  const stageOf = o => o.status === 'received' ? 'received' : o.shipped ? 'shipped' : 'issued';
+  const stageOf = o => o.status === 'received' ? 'received' : isShipped(o) || docsOf(o) ? 'shipped' : 'issued';
   const STAGE_LABEL = { issued: 'صادر', shipped: 'تم الشحن', received: 'وصل المخزون' };
   // الحالات الرئيسية الأربع (+ بانتظار الاعتماد) — عليها تركّز كل التقارير والفلاتر
   const MAIN_STATUSES = ['بانتظار الاعتماد', 'صادر', 'مشحون — بدون أوراق', 'مشحون — استلمنا الأوراق', 'وصل المستودع'];
   function mainStatusOf(o, docs) {
     if (o.pendingApproval) return 'بانتظار الاعتماد';
     if (o.status === 'received') return 'وصل المستودع';
-    if (o.shipped) return docs ? 'مشحون — استلمنا الأوراق' : 'مشحون — بدون أوراق';
+    if (docs) return 'مشحون — استلمنا الأوراق';
+    if (isShipped(o)) return 'مشحون — بدون أوراق';
     return 'صادر';
   }
   function poSummary(db, todayIso) {
@@ -614,11 +613,11 @@
       const plan = foreign ? poPlan(db, o, today) : null;
       const autoEta = plan && plan.eta ? plan.eta : addMonthsDate(o.poDate || o.firstSeen, poLead(db, o));
       const eta = o.etaManual && o.eta ? o.eta : autoEta;
-      const expShip = plan && o.status === 'open' && !o.shipped ? plan.shipPlanned : '';
+      const expShip = plan && o.status === 'open' && !isShipped(o) && !docsOf(o) ? plan.shipPlanned : '';
       const shipLateDays = expShip ? dayDiff(today, expShip) : 0;
       const daysToEta = eta ? dayDiff(eta, today) : null;
       const payStatus = totalSar <= 0 ? 'غير محدد' : paidSar <= 0.005 ? 'غير مسدد' : paidSar + 0.5 >= totalSar ? 'مسدد' : 'مسدد جزئيًا';
-      const docs = plan ? plan.docs : docsOf(o, false);
+      const docs = docsOf(o);
       return {
         no, status: o.status, stage: stageOf(o), stageLabel: STAGE_LABEL[stageOf(o)], mainStatus: mainStatusOf(o, docs), pending: !!o.pendingApproval, docs, foreign,
         blNo: o.blNo || '', shipDate: o.shipDate || o.shippedAt || '', attachments: (o.attachments || []).length, currency: o.currency || 'SAR', rate, value, shipping, extras, extrasSar, total, totalSar, paidSar, dueSar, payStatus,

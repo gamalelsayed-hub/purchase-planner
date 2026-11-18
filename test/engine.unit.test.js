@@ -124,9 +124,15 @@ delete db.items[0].prepDays; delete db.items[0].shipDays;
 E.setTrackStage(db, db.po.orders.P1, 'shipped', { date: '2026-09-20' });
 s1 = E.poSummary(db, '2026-09-20').find(o => o.no === 'P1');
 assert.strictEqual(s1.eta, '2026-11-06'); assert.strictEqual(s1.planEta, '2026-10-22'); assert.strictEqual(s1.variance, 15);
-assert.strictEqual(s1.mainStatus, 'مشحون — بدون أوراق');
+// الطريقة المعتمدة: المرحلة وحدها ما تغيّر الحالة — «مشحون» = فيه مبلغ شحن، و«بأوراق» = المحاسب علّم استلمنا
+assert.strictEqual(s1.mainStatus, 'صادر');
+db.po.orders.P1.shipping = 500;
+assert.strictEqual(E.poSummary(db, '2026-09-20').find(o => o.no === 'P1').mainStatus, 'مشحون — بدون أوراق');
 E.setTrackStage(db, db.po.orders.P1, 'docs', { date: '2026-09-25' });
+assert.strictEqual(E.poSummary(db, '2026-09-25').find(o => o.no === 'P1').mainStatus, 'مشحون — بدون أوراق', 'docs stage alone is not docs');
+db.po.orders.P1.docsManual = 'yes';
 assert.strictEqual(E.poSummary(db, '2026-09-25').find(o => o.no === 'P1').mainStatus, 'مشحون — استلمنا الأوراق');
+delete db.po.orders.P1.docsManual; db.po.orders.P1.shipping = 0;
 // إرجاع P1 لحالته (باقي الاختبارات تعتمد عليه صادر بدون متابعة)
 delete db.po.orders.P1.track; db.po.orders.P1.shipped = false; db.po.orders.P1.shippedAt = ''; db.po.orders.P1.shippedBy = '';
 // نوع محلي (مصنع) ← بدون مراحل شحن، والوصول بفترة التوصيل
@@ -149,11 +155,11 @@ close(p3.dueSar, (2000 - 500) * 3.75, 'P3 due'); assert.strictEqual(p3.payStatus
 // إعادة استيراد الشيت لا تكرر الدفعات
 I.applyPOPay(db, [{ poNo: 'P1', status: 'تم السداد' }], { date: '2026-07-21', currencyHint: 'USD' });
 assert.strictEqual(db.po.orders.P1.payments.length, 1);
-// المراحل: الأوامر في شيت المحاسب ← «تم الشحن»، والوصول = تاريخ الشحن + مدة الشحن
-assert.strictEqual(E.stageOf(db.po.orders.P1), 'shipped'); assert.strictEqual(E.stageOf(db.po.orders.P2), 'issued');
+// الطريقة المعتمدة: «مشحون» = فيه مبلغ شحن (الوجود في شيت المحاسب وحده ما يكفي)
+assert.strictEqual(E.stageOf(db.po.orders.P1), E.num(db.po.orders.P1.shipping) > 0 ? 'shipped' : 'issued'); assert.strictEqual(E.stageOf(db.po.orders.P2), 'issued');
 I.applyPOPay(db, [{ poNo: 'P2', status: 'لم يتم السداد', shipDate: '2026-08-01', blNo: 'BL-77' }], { date: '2026-08-02' });
 const p2 = E.poSummary(db, '2026-08-02').find(o => o.no === 'P2');
-assert.strictEqual(p2.stage, 'shipped'); assert.strictEqual(p2.blNo, 'BL-77'); assert.strictEqual(p2.eta, '2026-08-01', 'local order: PO date + lead time (no shipping stages)');
+assert.strictEqual(p2.stage, 'issued', 'no shipping amount → still issued'); assert.strictEqual(p2.blNo, 'BL-77'); assert.strictEqual(p2.eta, '2026-08-01', 'local order: PO date + lead time (no shipping stages)');
 // تاريخ الأمر من الشيت: الأمر الصادر يحسب وصوله من تاريخ الأمر + فترة التوصيل
 db.po.orders.P2.shipped = false; db.po.orders.P2.shipDate = ''; db.po.orders.P2.shippedAt = '';
 I.applyPOPay(db, [{ poNo: 'P2', poDate: '2026-05-01' }], { date: '2026-08-03' });
@@ -179,7 +185,7 @@ assert.strictEqual(tr.stageId, 'prep'); assert.strictEqual(tr.group, 'عند ا�
 assert.strictEqual(tr.daysIn, 51);
 // الشحن يحوّل الحالة العامة «تم الشحن»
 E.setTrackStage(db, T1, 'shipped', { date: '2026-08-26' });
-assert.ok(T1.shipped); assert.strictEqual(E.poSummary(db, '2026-08-26').find(o => o.no === 'T1').stage, 'shipped');
+assert.ok(T1.shipped); assert.strictEqual(E.poSummary(db, '2026-08-26').find(o => o.no === 'T1').stage, 'issued', 'stage alone does not make it shipped (no shipping amount)');
 tr = E.trackSummary(db, '2026-08-26').find(t => t.no === 'T1');
 assert.strictEqual(tr.group, 'تحت الشحن');
 // الوصول من المراحل: 26/8 + شحن 30 + أوراق 5 + للمخلّص 2 + ميناء 3 + تخليص 5 + خروج 2 = +47 يوم
@@ -330,17 +336,17 @@ assert.strictEqual(db.po.orders.K1.track.stage, 'emptyReturned'); assert.ok(db.p
   assert.strictEqual(I.mapTrackStatus(d5, 'تحصيلرسوم'), 'customs'); assert.strictEqual(I.mapTrackStatus(d5, 'مواني'), 'customs');
 }
 
-// الأوراق: «مطلوب تلكس» = بدون أوراق، والخانة اليدوية تغلب، ومرفق التلكس يكفي
+// الأوراق: بس علامة المحاسب — لا المرحلة ولا التلكس ولا المرفقات
 {
   const d6 = E.emptyDb(); d6.shipStages = E.defaultShipStages();
   const o = d6.po.orders.D1 = { no: 'D1', status: 'open', currency: 'USD', lines: [], payments: [], firstSeen: '2026-09-01', poDate: '2026-09-01' };
   E.setTrackStage(d6, o, 'customs', { date: '2026-11-01' });
   const st = () => E.poSummary(d6, '2026-11-10').find(x => x.no === 'D1').mainStatus;
-  assert.strictEqual(st(), 'مشحون — استلمنا الأوراق');
-  o.track.needTelex = true; assert.strictEqual(st(), 'مشحون — بدون أوراق', 'clearer waiting telex → no docs');
-  o.docsManual = 'yes'; assert.strictEqual(st(), 'مشحون — استلمنا الأوراق', 'manual yes wins');
-  o.docsManual = 'no'; o.track.needTelex = false; assert.strictEqual(st(), 'مشحون — بدون أوراق', 'manual no wins');
-  delete o.docsManual; o.track.needTelex = true; o.attachments = [{ kind: 'تلكس', name: 't.pdf' }]; assert.strictEqual(st(), 'مشحون — استلمنا الأوراق', 'telex attachment');
+  assert.strictEqual(st(), 'صادر', 'no shipping amount → issued even if clearer moved it');
+  o.shipping = 1200; assert.strictEqual(st(), 'مشحون — بدون أوراق');
+  o.attachments = [{ kind: 'تلكس', name: 't.pdf' }]; assert.strictEqual(st(), 'مشحون — بدون أوراق', 'attachment alone is not docs');
+  o.docsManual = 'yes'; assert.strictEqual(st(), 'مشحون — استلمنا الأوراق');
+  o.status = 'received'; assert.strictEqual(st(), 'وصل المستودع');
 }
 
 console.log('✓ all engine unit tests passed');

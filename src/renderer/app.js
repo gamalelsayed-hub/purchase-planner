@@ -1670,6 +1670,7 @@
         <label class="f">رسوم الشحن (بعملة الأمر)<input id="o_ship" type="number" step="any" value="${o.shipping || ''}" ${dis(canPay)}></label>
         ${(o.lines || []).length ? '' : `<label class="f">قيمة الأمر (بدون أصناف)<input id="o_val" type="number" step="any" value="${o.manualValue || ''}" ${dis(canPay)}></label>`}
         <label class="f">تاريخ الأمر<input id="o_pd" type="date" value="${esc(o.poDate || '')}" ${dis(canSt || canPay)}></label>
+        <label class="f">الأوراق (يعلّمها المحاسب)<select id="o_docs" ${dis(canSt || canPay)}><option value="" ${o.docsManual === 'yes' ? '' : 'selected'}>ما استلمنا الأوراق</option><option value="yes" ${o.docsManual === 'yes' ? 'selected' : ''}>استلمنا الأوراق</option></select></label>
         <label class="f">رقم بوليصة الشحن<input id="o_bl" value="${esc(o.blNo || '')}" ${dis(canSt)}></label>
         <label class="f">تاريخ الشحن<input id="o_sd" type="date" value="${esc(o.shipDate || '')}" ${dis(canSt)}></label>
         <label class="f">الوصول المتوقع — فارغ = تلقائي (${esc(auto || '—')})<input id="o_eta" type="date" value="${esc(o.etaManual ? o.eta : '')}" ${dis(canSt)}></label>
@@ -1713,7 +1714,7 @@
         <button class="primary" id="p_add">+ إضافة دفعة</button><button id="p_full">سداد المتبقي بالكامل</button>
       </div>` : ''}
 `,
-      foot: `<button class="primary" data-save ${canPay || canSt ? '' : 'disabled'}>حفظ</button><button data-close>إغلاق</button>${sm.pending && can('approve') ? '<button class="ok" data-approvepo>✔ اعتماد الأمر</button>' : ''}<span class="grow"></span>${canSt && o.status === 'open' ? (o.shipped ? '<button data-unship>إلغاء «تم الشحن»</button>' : '<button data-ship>🚢 تم الشحن</button>') : ''}${canSt ? (o.status === 'open' ? '<button class="ok" data-recv>وصل المخزون</button>' : '<button data-reopen>إعادة فتح (لم يصل)</button>') : ''}${can('data_admin') ? '<button class="danger" data-delpo>حذف الأمر</button>' : ''}`,
+      foot: `<button class="primary" data-save ${canPay || canSt ? '' : 'disabled'}>حفظ</button><button data-close>إغلاق</button>${sm.pending && can('approve') ? '<button class="ok" data-approvepo>✔ اعتماد الأمر</button>' : ''}<span class="grow"></span>${canSt ? (o.status === 'open' ? '<button class="ok" data-recv>وصل المخزون</button>' : '<button data-reopen>إعادة فتح (لم يصل)</button>') : ''}${can('data_admin') ? '<button class="danger" data-delpo>حذف الأمر</button>' : ''}`,
       onMount: m => {
         const save = () => {
           if (canPay) {
@@ -1727,7 +1728,10 @@
             o.blNo = m.q('#o_bl').value.trim(); o.shipDate = m.q('#o_sd').value;
             if ((o.blNo || o.shipDate) && !o.shipped && o.status === 'open') { o.shipped = true; o.shippedAt = o.shipDate || today(); o.shippedBy = 'manual'; }
           }
-          if (canPay || canSt) { o.note = m.q('#o_note').value.trim(); o.poDate = m.q('#o_pd').value; }
+          if (canPay || canSt) {
+            o.note = m.q('#o_note').value.trim(); o.poDate = m.q('#o_pd').value;
+            const dm = m.q('#o_docs').value; if ((o.docsManual === 'yes' ? 'yes' : '') !== dm) { if (dm) o.docsManual = 'yes'; else delete o.docsManual; log(`أمر الشراء ${no}: ${dm ? 'استلمنا الأوراق' : 'ما استلمنا الأوراق'}`); }
+          }
         };
         m.q('[data-save]').onclick = () => { save(); if (m._saveTrack) m._saveTrack(); log('تعديل أمر الشراء ' + no); m.close(); commit(); toast('تم الحفظ', 'ok'); };
         const reopenModal = () => { m.close(); commit(); poModal(no); };
@@ -1799,7 +1803,6 @@
       <div class="form f4">
         <label class="f">CO<select id="t_fw" ${dis}><option value="">—</option>${fws.map(p => `<option value="${esc(p.id)}" ${tr.forwarder === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
         <label class="f">المخلّص الجمركي<select id="t_cl" ${dis}><option value="">—</option>${cls.map(p => `<option value="${esc(p.id)}" ${tr.clearer === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
-        <label class="f">الأوراق (البوليصة/التلكس)<select id="t_docs" ${dis}>${[['', 'تلقائي'], ['yes', 'استلمنا الأوراق'], ['no', 'ما استلمنا الأوراق']].map(([k, l]) => `<option value="${k}" ${(o.docsManual || '') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
         <label class="f">نوع مستند الشحن<select id="t_doc" ${dis}><option value="">—</option>${['بوليصة', 'تلكس'].map(x => `<option ${tr.docType === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
         <label class="f">أيام السماح للحاوية (فارغ = ${fmt(t.freeDays)})<input id="t_free" type="number" step="1" min="0" value="${tr.freeDays || ''}" ${dis}></label>
       </div>
@@ -1842,7 +1845,6 @@
     const saveTrack = () => {
       o.track = o.track || { history: [], containers: [] };
       o.track.forwarder = m.q('#t_fw').value; o.track.clearer = m.q('#t_cl').value; o.track.docType = m.q('#t_doc').value;
-      const dm = m.q('#t_docs').value; if ((o.docsManual || '') !== dm) { if (dm) o.docsManual = dm; else delete o.docsManual; log(`أمر الشراء ${o.no}: الأوراق ${dm === 'yes' ? 'استلمنا' : dm === 'no' ? 'ما استلمنا' : 'تلقائي'}`); }
       o.track.freeDays = m.q('#t_free').value === '' ? null : num(m.q('#t_free').value);
     };
     m._saveTrack = saveTrack;
@@ -2001,13 +2003,13 @@
           <label class="chk" style="margin-top:22px"><input type="checkbox" id="b_back"> اسمح بالرجوع لمرحلة سابقة</label>
           <label class="f">CO<select id="b_fw">${keep}<option value="__clear">— مسح —</option>${fws.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label>
           <label class="f">المخلّص الجمركي<select id="b_cl">${keep}<option value="__clear">— مسح —</option>${cls.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label>
-          <label class="f">الأوراق (البوليصة/التلكس)<select id="b_docs">${keep}<option value="yes">استلمنا الأوراق</option><option value="no">ما استلمنا الأوراق</option><option value="auto">تلقائي</option></select></label>
           <label class="f">نوع مستند الشحن<select id="b_doc">${keep}<option>بوليصة</option><option>تلكس</option></select></label>
           <label class="f">أيام السماح للحاوية<input id="b_free" type="number" step="1" min="0" placeholder="بدون تغيير"></label>
         </div>`)}
         ${nos.some(no => db.po.orders[no].pendingApproval) && can('approve') ? `<div class="banner warn"><label class="chk grow"><input type="checkbox" id="b_approve"> اعتماد الأوامر اليدوية المحددة (${fmt(nos.filter(no => db.po.orders[no].pendingApproval).length)} بانتظار الاعتماد)</label></div>` : ''}
         ${sec(cI || cP, `<h3>الحالة والتواريخ</h3><div class="form f4">
-          <label class="f">الحالة<select id="b_status">${keep}<option value="shipped">🚢 تم الشحن</option><option value="received">وصل المخزون</option><option value="open">إعادة فتح (لم يصل)</option><option value="unship">إلغاء «تم الشحن»</option></select></label>
+          <label class="f">الحالة<select id="b_status">${keep}<option value="received">وصل المخزون</option><option value="open">إعادة فتح (لم يصل)</option></select></label>
+          <label class="f">الأوراق<select id="b_docs">${keep}<option value="yes">استلمنا الأوراق</option><option value="no">ما استلمنا الأوراق</option></select></label>
           <label class="f">تاريخ الشحن<input id="b_shipdate" type="date"></label>
           <label class="f">الوصول المتوقع<input id="b_eta" type="date"></label>
           <label class="chk" style="margin-top:22px"><input type="checkbox" id="b_etaauto"> إرجاع الوصول المتوقع للتلقائي</label>
@@ -2038,8 +2040,6 @@
               if (fw) { o.track.forwarder = fw === '__clear' ? '' : fw; ch = true; }
               if (cl) { o.track.clearer = cl === '__clear' ? '' : cl; ch = true; }
               if (doc) { o.track.docType = doc; ch = true; }
-              const dm = v('#b_docs');
-              if (dm) { if (dm === 'auto') delete o.docsManual; else o.docsManual = dm; ch = true; }
               if (fd !== '') { o.track.freeDays = num(fd); ch = true; }
               if (stage) {
                 const cur = E.trackStageIndex(db, o), nx = db.shipStages.findIndex(x => x.id === stage);
@@ -2047,7 +2047,8 @@
               }
             }
             if (cI || cP) {
-              const sd = v('#b_shipdate'), eta = v('#b_eta');
+              const sd = v('#b_shipdate'), eta = v('#b_eta'), dm = v('#b_docs');
+              if (dm === 'yes' && o.docsManual !== 'yes') { o.docsManual = 'yes'; ch = true; } else if (dm === 'no' && o.docsManual) { delete o.docsManual; ch = true; }
               if (status === 'shipped' && o.status === 'open') { o.shipped = true; o.shipDate = sd || o.shipDate || today(); o.shippedAt = o.shipDate; o.shippedBy = 'manual'; ch = true; }
               else if (status === 'unship' && o.shipped) { o.shipped = false; o.shippedAt = ''; o.shippedBy = ''; ch = true; }
               else if (status === 'received' && o.status === 'open') { o.status = 'received'; o.receivedAt = today(); o.receivedBy = 'manual'; o.receivedNote = 'تعديل جماعي — ' + ui.user.name; ch = true; }
