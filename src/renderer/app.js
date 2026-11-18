@@ -1799,6 +1799,7 @@
       <div class="form f4">
         <label class="f">CO<select id="t_fw" ${dis}><option value="">—</option>${fws.map(p => `<option value="${esc(p.id)}" ${tr.forwarder === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
         <label class="f">المخلّص الجمركي<select id="t_cl" ${dis}><option value="">—</option>${cls.map(p => `<option value="${esc(p.id)}" ${tr.clearer === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+        <label class="f">الأوراق (البوليصة/التلكس)<select id="t_docs" ${dis}>${[['', 'تلقائي'], ['yes', 'استلمنا الأوراق'], ['no', 'ما استلمنا الأوراق']].map(([k, l]) => `<option value="${k}" ${(o.docsManual || '') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
         <label class="f">نوع مستند الشحن<select id="t_doc" ${dis}><option value="">—</option>${['بوليصة', 'تلكس'].map(x => `<option ${tr.docType === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
         <label class="f">أيام السماح للحاوية (فارغ = ${fmt(t.freeDays)})<input id="t_free" type="number" step="1" min="0" value="${tr.freeDays || ''}" ${dis}></label>
       </div>
@@ -1841,6 +1842,7 @@
     const saveTrack = () => {
       o.track = o.track || { history: [], containers: [] };
       o.track.forwarder = m.q('#t_fw').value; o.track.clearer = m.q('#t_cl').value; o.track.docType = m.q('#t_doc').value;
+      const dm = m.q('#t_docs').value; if ((o.docsManual || '') !== dm) { if (dm) o.docsManual = dm; else delete o.docsManual; log(`أمر الشراء ${o.no}: الأوراق ${dm === 'yes' ? 'استلمنا' : dm === 'no' ? 'ما استلمنا' : 'تلقائي'}`); }
       o.track.freeDays = m.q('#t_free').value === '' ? null : num(m.q('#t_free').value);
     };
     m._saveTrack = saveTrack;
@@ -1999,6 +2001,7 @@
           <label class="chk" style="margin-top:22px"><input type="checkbox" id="b_back"> اسمح بالرجوع لمرحلة سابقة</label>
           <label class="f">CO<select id="b_fw">${keep}<option value="__clear">— مسح —</option>${fws.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label>
           <label class="f">المخلّص الجمركي<select id="b_cl">${keep}<option value="__clear">— مسح —</option>${cls.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label>
+          <label class="f">الأوراق (البوليصة/التلكس)<select id="b_docs">${keep}<option value="yes">استلمنا الأوراق</option><option value="no">ما استلمنا الأوراق</option><option value="auto">تلقائي</option></select></label>
           <label class="f">نوع مستند الشحن<select id="b_doc">${keep}<option>بوليصة</option><option>تلكس</option></select></label>
           <label class="f">أيام السماح للحاوية<input id="b_free" type="number" step="1" min="0" placeholder="بدون تغيير"></label>
         </div>`)}
@@ -2035,6 +2038,8 @@
               if (fw) { o.track.forwarder = fw === '__clear' ? '' : fw; ch = true; }
               if (cl) { o.track.clearer = cl === '__clear' ? '' : cl; ch = true; }
               if (doc) { o.track.docType = doc; ch = true; }
+              const dm = v('#b_docs');
+              if (dm) { if (dm === 'auto') delete o.docsManual; else o.docsManual = dm; ch = true; }
               if (fd !== '') { o.track.freeDays = num(fd); ch = true; }
               if (stage) {
                 const cur = E.trackStageIndex(db, o), nx = db.shipStages.findIndex(x => x.id === stage);

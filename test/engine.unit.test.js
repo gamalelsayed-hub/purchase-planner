@@ -330,4 +330,17 @@ assert.strictEqual(db.po.orders.K1.track.stage, 'emptyReturned'); assert.ok(db.p
   assert.strictEqual(I.mapTrackStatus(d5, 'تحصيلرسوم'), 'customs'); assert.strictEqual(I.mapTrackStatus(d5, 'مواني'), 'customs');
 }
 
+// الأوراق: «مطلوب تلكس» = بدون أوراق، والخانة اليدوية تغلب، ومرفق التلكس يكفي
+{
+  const d6 = E.emptyDb(); d6.shipStages = E.defaultShipStages();
+  const o = d6.po.orders.D1 = { no: 'D1', status: 'open', currency: 'USD', lines: [], payments: [], firstSeen: '2026-09-01', poDate: '2026-09-01' };
+  E.setTrackStage(d6, o, 'customs', { date: '2026-11-01' });
+  const st = () => E.poSummary(d6, '2026-11-10').find(x => x.no === 'D1').mainStatus;
+  assert.strictEqual(st(), 'مشحون — استلمنا الأوراق');
+  o.track.needTelex = true; assert.strictEqual(st(), 'مشحون — بدون أوراق', 'clearer waiting telex → no docs');
+  o.docsManual = 'yes'; assert.strictEqual(st(), 'مشحون — استلمنا الأوراق', 'manual yes wins');
+  o.docsManual = 'no'; o.track.needTelex = false; assert.strictEqual(st(), 'مشحون — بدون أوراق', 'manual no wins');
+  delete o.docsManual; o.track.needTelex = true; o.attachments = [{ kind: 'تلكس', name: 't.pdf' }]; assert.strictEqual(st(), 'مشحون — استلمنا الأوراق', 'telex attachment');
+}
+
 console.log('✓ all engine unit tests passed');

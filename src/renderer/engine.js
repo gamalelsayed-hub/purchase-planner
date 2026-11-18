@@ -526,6 +526,13 @@
   }
   // الخطة التراكمية للأمر: كل مرحلة مخططها = تاريخ الأمر + مجموع مدد المراحل قبلها.
   // الفعلي من سجل التحديثات، والمتوقع للمراحل الباقية ينزاح من آخر تاريخ فعلي (ولا يكون قبل اليوم).
+  // الأوراق مستلمة؟ يدوي (استلمنا / ما استلمنا) يغلب، وإلا: مرفق بوليصة/تلكس، أو وصل مرحلة الأوراق والمخلّص ما ينتظر التلكس منّا
+  function docsOf(o, reached) {
+    if (o.docsManual === 'yes') return true;
+    if (o.docsManual === 'no') return false;
+    if ((o.attachments || []).some(a => /بوليصة|تلكس/.test(a.kind || ''))) return true;
+    return !!reached && !(o.track && o.track.needTelex);
+  }
   function poPlan(db, o, todayIso) {
     const today = todayIso || new Date().toISOString().slice(0, 10);
     const st = db.shipStages || [];
@@ -554,7 +561,7 @@
     const eta = recvIdx < 0 ? '' : (cur >= recvIdx ? (actual[recvIdx] || anchor) : forecast[recvIdx]);
     const planEta = recvIdx >= 0 ? planned[recvIdx] : '';
     const daysIn = dayDiff(today, anchor);
-    const docs = (docsIdx >= 0 && cur >= docsIdx) || (o.attachments || []).some(a => /بوليصة|تلكس/.test(a.kind || ''));
+    const docs = docsOf(o, docsIdx >= 0 && cur >= docsIdx);
     return {
       base, durs, planned, actual, forecast, cur, anchor, daysIn, closed,
       late: !closed && durs[cur] > 0 && daysIn > durs[cur],
@@ -611,7 +618,7 @@
       const shipLateDays = expShip ? dayDiff(today, expShip) : 0;
       const daysToEta = eta ? dayDiff(eta, today) : null;
       const payStatus = totalSar <= 0 ? 'غير محدد' : paidSar <= 0.005 ? 'غير مسدد' : paidSar + 0.5 >= totalSar ? 'مسدد' : 'مسدد جزئيًا';
-      const docs = plan ? plan.docs : (o.attachments || []).some(a => /بوليصة|تلكس/.test(a.kind || ''));
+      const docs = plan ? plan.docs : docsOf(o, false);
       return {
         no, status: o.status, stage: stageOf(o), stageLabel: STAGE_LABEL[stageOf(o)], mainStatus: mainStatusOf(o, docs), pending: !!o.pendingApproval, docs, foreign,
         blNo: o.blNo || '', shipDate: o.shipDate || o.shippedAt || '', attachments: (o.attachments || []).length, currency: o.currency || 'SAR', rate, value, shipping, extras, extrasSar, total, totalSar, paidSar, dueSar, payStatus,
