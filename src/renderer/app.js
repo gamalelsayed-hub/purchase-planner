@@ -2027,7 +2027,7 @@
         </div>`)}
         ${nos.some(no => db.po.orders[no].pendingApproval) && can('approve') ? `<div class="banner warn"><label class="chk grow"><input type="checkbox" id="b_approve"> اعتماد الأوامر اليدوية المحددة (${fmt(nos.filter(no => db.po.orders[no].pendingApproval).length)} بانتظار الاعتماد)</label></div>` : ''}
         ${sec(cI || cP, `<h3>الحالة والتواريخ</h3><div class="form f4">
-          <label class="f">الحالة<select id="b_status">${keep}<option value="received">وصل المخزون</option><option value="open">إعادة فتح (لم يصل)</option></select></label>
+          <label class="f">الحالة الرئيسية<select id="b_status">${keep}<option value="issued">صادر</option><option value="shipNoDocs">مشحون — بدون أوراق</option><option value="shipDocs">مشحون — استلمنا الأوراق</option><option value="received">وصل المستودع</option><option value="open">إعادة فتح (لم يصل)</option></select></label>
           <label class="f">مشحون (يدوي)<select id="b_shipm">${keep}<option value="yes">نعم — مشحون</option><option value="no">لا (حسب رسوم الشحن)</option></select></label>
           <label class="f">الأوراق<select id="b_docs">${keep}<option value="yes">استلمنا الأوراق</option><option value="no">ما استلمنا الأوراق</option></select></label>
           <label class="f">تاريخ الشحن<input id="b_shipdate" type="date"></label>
@@ -2047,6 +2047,7 @@
         const v = sel => { const x = m.q(sel); return x ? (x.type === 'checkbox' ? x.checked : x.value) : ''; };
         m.q('[data-ok]').onclick = async () => {
           const stage = v('#b_stage'), status = v('#b_status'), payall = v('#b_payall');
+          if (status === 'issued' && !await confirmBox(`إرجاع ${fmt(nos.length)} أمر «صادر»؟ تنمسح رسوم الشحن، و«مشحون (يدوي)»، وعلامة «استلمنا الأوراق».`, { ok: 'إرجاع صادر', danger: true })) return;
           if (status === 'received' && !await confirmBox(`تعليم ${fmt(nos.length)} أمر «وصل المخزون»؟ كمياتها تنشال من البضاعة بالطريق.`, { ok: 'تطبيق' })) return;
           if (payall && !await confirmBox(`تسجيل سداد المتبقي بالكامل لـ ${fmt(nos.length)} أمر؟`, { ok: 'تسجيل السداد' })) return;
           await saveNow(); await api.snapshot('before-bulk-po');
@@ -2072,6 +2073,13 @@
               if (dm === 'yes' && o.docsManual !== 'yes') { o.docsManual = 'yes'; ch = true; } else if (dm === 'no' && o.docsManual) { delete o.docsManual; ch = true; }
               if (status === 'shipped' && o.status === 'open') { o.shipped = true; o.shipDate = sd || o.shipDate || today(); o.shippedAt = o.shipDate; o.shippedBy = 'manual'; ch = true; }
               else if (status === 'unship' && o.shipped) { o.shipped = false; o.shippedAt = ''; o.shippedBy = ''; ch = true; }
+              else if ((status === 'shipNoDocs' || status === 'shipDocs') && o.status === 'open') {
+                if (!(E.num(o.shipping) > 0) && !o.shippedManual) o.shippedManual = true; // بدون رسوم شحن ← مشحون يدوي
+                if (status === 'shipDocs' && o.docsManual !== 'yes') { o.docsManual = 'yes'; o.docsAt = today(); o.docsBy = ui.user.name; }
+                if (status === 'shipNoDocs' && o.docsManual) { delete o.docsManual; delete o.docsAt; delete o.docsBy; }
+                log('أمر الشراء ' + o.no + ': ' + (status === 'shipDocs' ? 'مشحون — استلمنا الأوراق' : 'مشحون — بدون أوراق')); ch = true;
+              }
+              else if (status === 'issued') { if (o.status === 'open' && (o.shipping || o.shippedManual || o.docsManual)) { o.shipping = 0; delete o.shippedManual; delete o.docsManual; delete o.docsAt; delete o.docsBy; log('أمر الشراء ' + o.no + ': إرجاع صادر'); ch = true; } }
               else if (status === 'received' && o.status === 'open') { o.status = 'received'; o.receivedAt = today(); o.receivedBy = 'manual'; o.receivedNote = 'تعديل جماعي — ' + ui.user.name; ch = true; }
               else if (status === 'open' && o.status === 'received') { o.status = 'open'; o.receivedAt = ''; o.receivedBy = ''; ch = true; }
               if (sd && status !== 'shipped') { o.shipDate = sd; ch = true; }
