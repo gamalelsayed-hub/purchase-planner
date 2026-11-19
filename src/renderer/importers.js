@@ -106,7 +106,8 @@
       title: 'استلام الأوراق',
       fields: [
         { key: 'poNo', label: 'رقم الأمر', aliases: ['رقم الأمر', 'رقم الامر', 'رقم امر الشراء', 'رقم معاملة العميل', 'امر الشراء', 'po'], required: true },
-        { key: 'docs', label: 'استلمنا الأوراق', aliases: ['استلمنا الأوراق', 'استلمنا الاوراق', 'استلام الأوراق', 'استلام الاوراق', 'الأوراق', 'الاوراق', 'docs'], required: true },
+        { key: 'docs', label: 'استلمنا الأوراق', aliases: ['استلمنا الأوراق', 'استلمنا الاوراق', 'استلام الأوراق', 'استلام الاوراق', 'الأوراق', 'الاوراق', 'docs'] },
+        { key: 'shippedManual', label: 'مشحون (يدوي)', aliases: ['مشحون (يدوي)', 'مشحون يدوي', 'تم الشحن', 'مشحون'] },
         { key: 'docsDate', label: 'تاريخ الاستلام', aliases: ['تاريخ الاستلام', 'تاريخ استلام الأوراق', 'تاريخ استلام الاوراق'] },
         { key: 'blNo', label: 'رقم البوليصة', aliases: ['رقم البوليصة', 'البوليصة', 'رقم بوليصة الشحن', 'bl', 'blno'] },
         { key: 'note', label: 'ملاحظة', aliases: ['ملاحظة', 'ملاحظات', 'note'] }
@@ -472,10 +473,13 @@
   }
   function applyDocs(db, recs, { date, user } = {}) {
     const po = ensurePo(db), day = date || new Date().toISOString().slice(0, 10);
-    const res = { rows: 0, yes: [], no: [], unchanged: 0, notFound: [], blank: 0 };
+    const res = { rows: 0, yes: [], no: [], unchanged: 0, notFound: [], blank: 0, shipYes: [], shipNo: [] };
     for (const r of recs) {
       if (!r.poNo) continue; res.rows++;
       const o = po.orders[r.poNo]; if (!o) { res.notFound.push(r.poNo); continue; }
+      const sv = docsVal(r.shippedManual);
+      if (sv === true && o.shippedManual !== true) { o.shippedManual = true; res.shipYes.push(o.no); }
+      else if (sv === false && o.shippedManual) { delete o.shippedManual; res.shipNo.push(o.no); }
       const v = docsVal(r.docs); if (v == null) { res.blank++; continue; }
       if (r.blNo && String(r.blNo).trim() && !o.blNo) o.blNo = String(r.blNo).trim();
       if (setDocs(o, v, { date: toDate(r.docsDate) || day, user, note: r.note ? String(r.note).trim() : '' })) (v ? res.yes : res.no).push(o.no); else res.unchanged++;

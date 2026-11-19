@@ -531,7 +531,8 @@
   // الطريقة المعتمدة للحالة الرئيسية:
   //  مشحون = الأمر قدامه مبلغ في «رسوم الشحن» (من تقرير أوامر الشراء)
   //  استلمنا الأوراق = المحاسب علّم «استلمنا الأوراق» — ولا شي غيره (لا المرحلة ولا التلكس ولا المرفقات)
-  const isShipped = o => num(o.shipping) > 0;
+  // مشحون = رسوم شحن في أونكس، أو «مشحون (يدوي)» للشحن على المورد / الرسوم اللي ما انسجلت (الاستيراد ما يلغيها)
+  const isShipped = o => num(o.shipping) > 0 || o.shippedManual === true;
   function docsOf(o) { return o.docsManual === 'yes'; }
   function poPlan(db, o, todayIso) {
     const today = todayIso || new Date().toISOString().slice(0, 10);
@@ -621,7 +622,7 @@
       const payStatus = totalSar <= 0 ? 'غير محدد' : paidSar <= 0.005 ? 'غير مسدد' : paidSar + 0.5 >= totalSar ? 'مسدد' : 'مسدد جزئيًا';
       const docs = docsOf(o);
       return {
-        no, status: o.status, stage: stageOf(o), stageLabel: STAGE_LABEL[stageOf(o)], mainStatus: mainStatusOf(o, docs), pending: !!o.pendingApproval, docs, foreign,
+        no, status: o.status, stage: stageOf(o), stageLabel: STAGE_LABEL[stageOf(o)], mainStatus: mainStatusOf(o, docs), pending: !!o.pendingApproval, docs, shippedManual: o.shippedManual === true, foreign,
         blNo: o.blNo || '', shipDate: o.shipDate || o.shippedAt || '', attachments: (o.attachments || []).length, currency: o.currency || 'SAR', rate, value, shipping, extras, extrasSar, total, totalSar, paidSar, dueSar, payStatus,
         remainingValue, lines: (o.lines || []).length, eta, etaManual: !!o.etaManual, daysToEta, planEta: plan ? plan.planEta : '', variance: plan && !o.etaManual ? plan.variance : (plan && plan.planEta && eta ? dayDiff(eta, plan.planEta) : null),
         agent: o.agent || '', supplier: o.supplier || '',

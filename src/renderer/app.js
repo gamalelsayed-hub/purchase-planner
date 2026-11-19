@@ -1463,7 +1463,7 @@
       ${db.settings.poAsTransit && manualTransit && all.some(o => o.lines && o.status === 'open') ? `<div class="banner warn no-print"><span class="grow">يوجد ${fmt(manualTransit)} سطر بضاعة بالطريق مُدخل يدويًا بجانب أوامر الشراء — إذا كانت نفس الأوامر فهي تنخصم مرتين.</span><button class="sm" data-act="clearManualTransit">مسح بالطريق اليدوي</button><button class="sm" data-act="dataTabGo" data-k="transit">عرض</button></div>` : ''}
       <div class="kpis" style="grid-template-columns:repeat(${E.MAIN_STATUSES.length + 3},minmax(0,1fr))">
         ${E.MAIN_STATUSES.map(s => `<div class="kpi" data-act="fonly" data-g="main" data-v="${esc(s)}" style="cursor:pointer"><div class="l">${esc(s)}</div><div class="v" style="${s === 'بانتظار الاعتماد' && cnt(s) ? 'color:var(--bad)' : ''}">${fmt(cnt(s))}</div><div class="s">أمر</div></div>`).join('')}
-        <div class="kpi" data-act="fonly" data-g="shipc" data-v="الشحن مسجّل" style="cursor:pointer" title="كل الأوامر اللي لها رسوم شحن: المشحونة + اللي وصلت المستودع"><div class="l">تم شحنها (الكل)</div><div class="v">${fmt(all.filter(o => !o.pending && o.shipping > 0).length)}</div><div class="s">لها رسوم شحن</div></div>
+        <div class="kpi" data-act="fonly" data-g="shipc" data-v="الشحن مسجّل" style="cursor:pointer" title="كل الأوامر اللي لها رسوم شحن: المشحونة + اللي وصلت المستودع"><div class="l">تم شحنها (الكل)</div><div class="v">${fmt(all.filter(o => !o.pending && (o.shipping > 0 || o.shippedManual)).length)}</div><div class="s">رسوم شحن أو مشحون يدوي</div></div>
         <div class="kpi" data-act="fonly" data-g="alert" data-v="مطلوب تلكس" style="cursor:pointer"><div class="l">مطلوب تلكس منّا</div><div class="v" style="color:var(--bad)">${fmt(all.filter(o => o.needTelex).length)}</div><div class="s">ينتظرها المخلّص</div></div>
         <div class="kpi" data-act="fonly" data-g="alert" data-v="متأخر عن الخطة" style="cursor:pointer"><div class="l">متأخر عن الخطة</div><div class="v" style="color:var(--bad)">${fmt(all.filter(o => o.alerts.includes('متأخر عن الخطة')).length)}</div><div class="s">الوصول بعد المخطط</div></div>
       </div>
@@ -1538,7 +1538,7 @@
       const has = (d, k) => d.map[k] != null && d.map[k] >= 0;
       let c = null;
       if (has(po, 'poNo') && has(po, 'code') && has(po, 'qty')) c = { kind: 'po', si, det: po, score: 30 + po.score };
-      else if (has(dc, 'poNo') && has(dc, 'docs') && !has(pay, 'paid') && !has(pay, 'status')) c = { kind: 'docs', si, det: dc, score: 25 + dc.score };
+      else if (has(dc, 'poNo') && (has(dc, 'docs') || has(dc, 'shippedManual')) && !has(pay, 'paid') && !has(pay, 'status')) c = { kind: 'docs', si, det: dc, score: 25 + dc.score };
       else if (has(tr, 'status') && (has(tr, 'containerNo') || has(tr, 'portDate') || has(tr, 'emptyDate'))) c = { kind: 'track', si, det: tr, score: 20 + tr.score };
       else if (has(pay, 'poNo') && (has(pay, 'status') || has(pay, 'shipping') || has(pay, 'paid') || has(pay, 'blNo') || has(pay, 'agent'))) c = { kind: 'poPay', si, det: pay, score: 10 + pay.score };
       if (c && (!best || c.score > best.score)) best = c;
@@ -1687,6 +1687,7 @@
         <label class="f">رسوم الشحن (بعملة الأمر)<input id="o_ship" type="number" step="any" value="${o.shipping || ''}" ${dis(canPay)}></label>
         ${(o.lines || []).length ? '' : `<label class="f">قيمة الأمر (بدون أصناف)<input id="o_val" type="number" step="any" value="${o.manualValue || ''}" ${dis(canPay)}></label>`}
         <label class="f">تاريخ الأمر<input id="o_pd" type="date" value="${esc(o.poDate || '')}" ${dis(canSt || canPay)}></label>
+        <label class="f">مشحون (يدوي) — للشحن على المورد أو رسوم ما انسجلت<select id="o_shipm" ${dis(canSt || canPay)}><option value="" ${o.shippedManual ? '' : 'selected'}>لا (حسب رسوم الشحن)</option><option value="yes" ${o.shippedManual ? 'selected' : ''}>نعم — مشحون</option></select></label>
         <label class="f">الأوراق (يعلّمها المحاسب)<select id="o_docs" ${dis(canSt || canPay)}><option value="" ${o.docsManual === 'yes' ? '' : 'selected'}>ما استلمنا الأوراق</option><option value="yes" ${o.docsManual === 'yes' ? 'selected' : ''}>استلمنا الأوراق</option></select></label>
         <label class="f">رقم بوليصة الشحن<input id="o_bl" value="${esc(o.blNo || '')}" ${dis(canSt)}></label>
         <label class="f">تاريخ الشحن<input id="o_sd" type="date" value="${esc(o.shipDate || '')}" ${dis(canSt)}></label>
@@ -1747,6 +1748,7 @@
           }
           if (canPay || canSt) {
             o.note = m.q('#o_note').value.trim(); o.poDate = m.q('#o_pd').value;
+            const sm2 = m.q('#o_shipm').value === 'yes'; if (!!o.shippedManual !== sm2) { if (sm2) o.shippedManual = true; else delete o.shippedManual; log(`أمر الشراء ${no}: ${sm2 ? 'مشحون (يدوي)' : 'إلغاء مشحون يدوي'}`); }
             const dm = m.q('#o_docs').value; if ((o.docsManual === 'yes' ? 'yes' : '') !== dm) { if (dm) o.docsManual = 'yes'; else delete o.docsManual; log(`أمر الشراء ${no}: ${dm ? 'استلمنا الأوراق' : 'ما استلمنا الأوراق'}`); }
           }
         };
@@ -2026,6 +2028,7 @@
         ${nos.some(no => db.po.orders[no].pendingApproval) && can('approve') ? `<div class="banner warn"><label class="chk grow"><input type="checkbox" id="b_approve"> اعتماد الأوامر اليدوية المحددة (${fmt(nos.filter(no => db.po.orders[no].pendingApproval).length)} بانتظار الاعتماد)</label></div>` : ''}
         ${sec(cI || cP, `<h3>الحالة والتواريخ</h3><div class="form f4">
           <label class="f">الحالة<select id="b_status">${keep}<option value="received">وصل المخزون</option><option value="open">إعادة فتح (لم يصل)</option></select></label>
+          <label class="f">مشحون (يدوي)<select id="b_shipm">${keep}<option value="yes">نعم — مشحون</option><option value="no">لا (حسب رسوم الشحن)</option></select></label>
           <label class="f">الأوراق<select id="b_docs">${keep}<option value="yes">استلمنا الأوراق</option><option value="no">ما استلمنا الأوراق</option></select></label>
           <label class="f">تاريخ الشحن<input id="b_shipdate" type="date"></label>
           <label class="f">الوصول المتوقع<input id="b_eta" type="date"></label>
@@ -2064,7 +2067,8 @@
               }
             }
             if (cI || cP) {
-              const sd = v('#b_shipdate'), eta = v('#b_eta'), dm = v('#b_docs');
+              const sd = v('#b_shipdate'), eta = v('#b_eta'), dm = v('#b_docs'), smv = v('#b_shipm');
+              if (smv === 'yes' && !o.shippedManual) { o.shippedManual = true; ch = true; } else if (smv === 'no' && o.shippedManual) { delete o.shippedManual; ch = true; }
               if (dm === 'yes' && o.docsManual !== 'yes') { o.docsManual = 'yes'; ch = true; } else if (dm === 'no' && o.docsManual) { delete o.docsManual; ch = true; }
               if (status === 'shipped' && o.status === 'open') { o.shipped = true; o.shipDate = sd || o.shipDate || today(); o.shippedAt = o.shipDate; o.shippedBy = 'manual'; ch = true; }
               else if (status === 'unship' && o.shipped) { o.shipped = false; o.shippedAt = ''; o.shippedBy = ''; ch = true; }
@@ -2327,7 +2331,7 @@
             if (!recs0.length) return toast('لا توجد أسطر صالحة', 'bad');
             await saveNow(); await api.snapshot('before-import-docs');
             const r = I.applyDocs(db, recs0, { date: today(), user: ui.user.name });
-            const msg = `استلام الأوراق: ${fmt(r.yes.length)} أمر صار «استلمنا الأوراق»${r.no.length ? ` — ${fmt(r.no.length)} انلغى` : ''} — بدون تغيير ${fmt(r.unchanged + r.blank)}`;
+            const msg = `استلام الأوراق: ${fmt(r.yes.length)} أمر صار «استلمنا الأوراق»${r.no.length ? ` — ${fmt(r.no.length)} انلغى` : ''}${r.shipYes.length ? ` — مشحون يدوي ${fmt(r.shipYes.length)}` : ''}${r.shipNo.length ? ` — إلغاء مشحون يدوي ${fmt(r.shipNo.length)}` : ''} — بدون تغيير ${fmt(r.rows - r.notFound.length - new Set(r.yes.concat(r.no, r.shipYes, r.shipNo)).size)}`;
             log(msg); m.close(); ui.page = 'po'; ui.poTab = 'orders'; commit(); await saveNow();
             modal({ title: 'نتيجة استيراد استلام الأوراق', size: 'narrow', body: `<div class="banner ok">${esc(msg)}</div>${r.yes.length ? `<p class="small">استلمنا: ${r.yes.map(esc).join('، ')}</p>` : ''}${r.no.length ? `<p class="small">انلغى: ${r.no.map(esc).join('، ')}</p>` : ''}${r.notFound.length ? `<div class="banner warn">أوامر مو عندنا: ${r.notFound.map(esc).join('، ')}</div>` : ''}`, foot: '<button class="primary" data-close>تم</button>' });
             return;
@@ -2558,14 +2562,14 @@
   }
   // شيت استلام الأوراق: الأوامر المشحونة (فيها مبلغ شحن) المفتوحة، والمحاسب يكتب نعم/لا
   function docsTemplateSpec() {
-    const rows = masterAll().filter(o => o.status === 'open' && !o.pending && (o.shipping > 0 || o.docs))
+    const rows = masterAll().filter(o => o.status === 'open' && !o.pending)
       .sort((a, b) => (a.docs - b.docs) || String(a.no).localeCompare(String(b.no)))
-      .map(o => { const po = db.po.orders[o.no]; return { poNo: o.no, co: o.forwarder, supplier: o.supplier, shipping: o.shipping, blNo: o.blNo, docs: o.docs ? 'نعم' : '', docsDate: po.docsAt || '', note: po.docsNote || '' }; });
+      .map(o => { const po = db.po.orders[o.no]; return { poNo: o.no, co: o.forwarder, supplier: o.supplier, shipping: o.shipping, blNo: o.blNo, shippedManual: o.shippedManual ? 'نعم' : '', docs: o.docs ? 'نعم' : '', docsDate: po.docsAt || '', note: po.docsNote || '' }; });
     const yn = "'القوائم'!$A$2:$A$3";
     return { sheets: [
-      { name: 'استلام الأوراق', title: 'استلام أوراق الشحن (البوليصة/التلكس)' + (db.settings.companyName ? ' — ' + db.settings.companyName : ''), subtitle: 'اكتب «نعم» قدام الأمر اللي استلمنا أوراقه (أو «لا» للإلغاء). الخانة الفاضية ما تغيّر شي. التاريخ بصيغة 2026-12-31.', columns: [
+      { name: 'استلام الأوراق', title: 'استلام أوراق الشحن (البوليصة/التلكس)' + (db.settings.companyName ? ' — ' + db.settings.companyName : ''), subtitle: 'كل الأوامر المفتوحة. «استلمنا الأوراق» = نعم للي استلمنا أوراقه. «مشحون (يدوي)» = نعم للي انشحن وما له رسوم شحن في أونكس (الشحن على المورد). «لا» تلغي، والفاضي ما يغيّر شي.', columns: [
         { header: 'رقم الأمر', key: 'poNo', width: 12 }, { header: 'CO', key: 'co', width: 22 }, { header: 'المورد', key: 'supplier', width: 18 }, { header: 'رسوم الشحن', key: 'shipping', width: 12, fmt: '#,##0.00' },
-        { header: 'رقم البوليصة', key: 'blNo', width: 18, input: true }, { header: 'استلمنا الأوراق', key: 'docs', width: 14, input: true, listRef: yn, listStrict: true },
+        { header: 'رقم البوليصة', key: 'blNo', width: 18, input: true }, { header: 'مشحون (يدوي)', key: 'shippedManual', width: 13, input: true, listRef: yn, listStrict: true }, { header: 'استلمنا الأوراق', key: 'docs', width: 14, input: true, listRef: yn, listStrict: true },
         { header: 'تاريخ الاستلام', key: 'docsDate', width: 14, input: true, fmt: 'yyyy-mm-dd' }, { header: 'ملاحظة', key: 'note', width: 30, input: true }
       ], rows },
       { name: 'القوائم', columns: [{ header: 'استلمنا الأوراق', key: 'v', width: 16 }], rows: [{ v: 'نعم' }, { v: 'لا' }] }

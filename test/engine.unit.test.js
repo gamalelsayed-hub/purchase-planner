@@ -380,4 +380,20 @@ assert.strictEqual(db.po.orders.K1.track.stage, 'emptyReturned'); assert.ok(db.p
   assert.ok(!d8.parties.some(p => /مركز عام/.test(p.name)), 'general cost center is still not a CO');
 }
 
+// مشحون (يدوي): الشحن على المورد — يبقى مشحون والاستيراد ما يلغيه
+{
+  const d9 = E.emptyDb(); d9.shipStages = E.defaultShipStages();
+  const hdr = ['المخزن', 'الكمية المتبقية', 'كمية الفاتورة', 'سعر امر الشراء', 'كمية امر الشراء', 'الوحدة', 'رقم الصنف', 'رقم الأمر', 'تاريخ امر الشراء', 'رسوم الشحن'];
+  const rows = [hdr, [1101, 5, 0, 100, 5, 'حبه', 'C1', 'S1', '01/08/2026', null]];
+  const dh = I.detectHeader(rows, 'po'), imp = () => I.applyPOs(d9, I.rowsToRecords(rows, dh.row, dh.map, 'poNo'), { date: '2026-08-02' });
+  imp();
+  const ms = () => E.poSummary(d9, '2026-08-05').find(x => x.no === 'S1').mainStatus;
+  assert.strictEqual(ms(), 'صادر');
+  const dr = [['رقم الأمر', 'مشحون (يدوي)', 'استلمنا الأوراق'], ['S1', 'نعم', '']];
+  const dd = I.detectHeader(dr, 'docs'), r = I.applyDocs(d9, I.rowsToRecords(dr, dd.row, dd.map, 'poNo'), { date: '2026-08-05' });
+  assert.deepStrictEqual(r.shipYes, ['S1']); assert.strictEqual(ms(), 'مشحون — بدون أوراق');
+  imp(); assert.strictEqual(ms(), 'مشحون — بدون أوراق', 're-import keeps manual shipped');
+  dr[1][1] = 'لا'; I.applyDocs(d9, I.rowsToRecords(dr, dd.row, dd.map, 'poNo'), {}); assert.strictEqual(ms(), 'صادر');
+}
+
 console.log('✓ all engine unit tests passed');
