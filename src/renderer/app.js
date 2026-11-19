@@ -1458,7 +1458,7 @@
     ], (db.po.imports || []).slice().reverse(), { empty: 'لا يوجد استيراد بعد' });
     else body = poOrdersTab();
     return `<div class="page-head"><div><h1>أوامر الشراء</h1><div class="sub">المتابعة والمعاملات الخارجية والسداد في مكان واحد — ${db.settings.poAsTransit ? 'الكمية المتبقية في الأوامر المفتوحة <b>تنخصم من الطلب</b>' : 'الأوامر <b>لا تنخصم من الطلب</b> (الإعداد مقفل)'}</div></div>
-      <div class="actions"><button class="ok" data-act="poBulkImport" title="تقرير أوامر الشراء + شيت الشحن والسداد + تقرير المخلّص مرة وحدة">⟳ تحديث شامل</button><button data-act="import" data-k="po">استيراد أوامر الشراء</button><button data-act="import" data-k="poPay">شيت الشحن والسداد</button><button data-act="import" data-k="track">تحديث المخلّص</button><button data-act="poNew">إضافة أمر يدوي</button><button data-act="tplTrack">النموذج الموحد للمخلّصين</button><button data-act="tpl" data-k="po">قالب أوامر الشراء</button><button data-act="tpl" data-k="poPay">قالب الشحن والسداد</button><button data-act="tpl" data-k="docs" title="معبّأ بالأوامر المشحونة — المحاسب يكتب نعم/لا">📄 شيت استلام الأوراق</button><button data-act="import" data-k="docs">استيراد استلام الأوراق</button></div></div>
+      <div class="actions"><button class="ok" data-act="poBulkImport" title="تقرير أوامر الشراء + شيت الشحن والسداد + تقرير المخلّص مرة وحدة">⟳ تحديث شامل</button><button data-act="import" data-k="po">استيراد أوامر الشراء</button><button data-act="import" data-k="poPay">شيت الشحن والسداد</button><button data-act="import" data-k="track">تحديث المخلّص</button><button data-act="poNew">إضافة أمر يدوي</button><button data-act="tplTrack">النموذج الموحد للمخلّصين</button><button data-act="tpl" data-k="po">قالب أوامر الشراء</button><button data-act="tpl" data-k="poPay">قالب الشحن والسداد</button><button data-act="tpl" data-k="docs" title="معبّأ بالأوامر المشحونة — المحاسب يكتب نعم/لا">📄 شيت استلام الأوراق</button><button data-act="import" data-k="docs">استيراد استلام الأوراق</button><button data-act="importVouchers" title="«تقارير سند الصرف» PDF من أونكس — يسجل السداد على الأوامر برقم الأمر">💳 استيراد سندات الصرف</button></div></div>
       ${demurrageBanner()}
       ${db.settings.poAsTransit && manualTransit && all.some(o => o.lines && o.status === 'open') ? `<div class="banner warn no-print"><span class="grow">يوجد ${fmt(manualTransit)} سطر بضاعة بالطريق مُدخل يدويًا بجانب أوامر الشراء — إذا كانت نفس الأوامر فهي تنخصم مرتين.</span><button class="sm" data-act="clearManualTransit">مسح بالطريق اليدوي</button><button class="sm" data-act="dataTabGo" data-k="transit">عرض</button></div>` : ''}
       <div class="kpis" style="grid-template-columns:repeat(${E.MAIN_STATUSES.length + 3},minmax(0,1fr))">
@@ -1526,10 +1526,11 @@
     });
   }
   // ---------- التحديث الشامل: أكثر من ملف مرة وحدة ----------
-  const BULK_KINDS = { po: 'تقرير أوامر الشراء (من النظام)', poPay: 'شيت الشحن والسداد', docs: 'شيت استلام الأوراق', clearer: 'تقرير المخلّص (بيان المعاملات)', track: 'قالب تحديث المخلّص', skip: '— تجاهل الملف —' };
+  const BULK_KINDS = { po: 'تقرير أوامر الشراء (من النظام)', poPay: 'شيت الشحن والسداد', docs: 'شيت استلام الأوراق', vouchers: 'سندات الصرف (PDF)', clearer: 'تقرير المخلّص (بيان المعاملات)', track: 'قالب تحديث المخلّص', skip: '— تجاهل الملف —' };
   // يعرف نوع الملف من أعمدته: المخلّص ← أوامر الشراء (فيها رقم الصنف والكمية) ← قالب المتابعة (فيه الحاوية) ← الشحن والسداد
   function detectFileKind(f) {
     if (!f.sheets || !f.sheets.length) return { kind: 'skip' };
+    if (f.sheets.some(sh => sh.vouchers)) return { kind: 'vouchers' };
     if (I.isClearerReport(f.sheets)) return { kind: 'clearer' };
     let best = null;
     f.sheets.forEach((sh, si) => {
@@ -1545,6 +1546,42 @@
     });
     return best || { kind: 'skip' };
   }
+  // استيراد سندات الصرف: معاينة ← تطبيق ← نتيجة فيها قائمة المراجعة
+  async function importVouchers() {
+    if (!can('po_payments')) return deny('po_payments');
+    let wb;
+    try { wb = await api.openExcel({ title: 'اختر ملف «تقارير سند الصرف» (PDF)' }); } catch (e) { return toast('تعذر قراءة الملف: ' + e.message, 'bad'); }
+    if (!wb) return;
+    const lines = (wb.sheets.find(sh => sh.vouchers) || {}).vouchers;
+    if (!lines) return toast('الملف مو «تقارير سند الصرف» — اختر ملف PDF السندات من أونكس', 'bad');
+    const plan = I.voucherPlan(db, lines);
+    const ok = plan.filter(l => l.pos.length), fee = ok.filter(l => l.kind === 'fee');
+    modal({
+      title: `سندات الصرف — ${esc(wb.name)}`, size: 'wide',
+      body: `<div class="banner ok"><span class="grow"><b>${fmt(new Set(lines.map(l => l.vno + l.date)).size)}</b> سند (${fmt(lines.length)} سطر) — <b>${fmt(ok.length)}</b> سطر فيه رقم أمر عندنا (${fmt(new Set(ok.flatMap(l => l.pos)).size)} أمر)، منها ${fmt(fee.length)} رسوم/مخاطر تنسجل تكاليف إضافية</span></div>
+        <div class="hint">كل سطر ينسجل <b>دفعة</b> على الأمر المكتوب رقمه في البيان (بعملة السطر). «اقفال» = الأمر مسدد بالكامل. نفس السند ما ينسجل مرتين لو استوردت الملف مرة ثانية. دفعات «من شيت السداد» على نفس الأوامر تنشال (السندات هي المرجع).</div>
+        ${table('vPrev', [{ k: 'vno', h: 'السند' }, { k: 'date', h: 'التاريخ' }, { k: 'pos', h: 'الأمر', v: l => l.pos.join(' + ') || (l.missing.length ? '⚠ ' + l.missing.join('، ') + ' (مو عندنا)' : '— بدون —') }, { k: 'kind', h: 'النوع', v: l => l.kind === 'fee' ? 'تكلفة إضافية' : l.kind }, { k: 'amount', h: 'المبلغ', n: true, d: 2 }, { k: 'cur', h: 'العملة' }, { k: 'desc', h: 'البيان', cls: 'wrap' }], plan, { short: true, pageSize: 50 })}`,
+      foot: `<button class="primary" data-ok>تسجيل السداد</button><button data-close>إلغاء</button>`,
+      onMount: m => { m.q('[data-ok]').onclick = async () => {
+        await saveNow(); await api.snapshot('before-vouchers');
+        const r = I.applyVouchers(db, lines, { user: ui.user.name, file: wb.name });
+        log(`سندات الصرف: ${r.added} دفعة على ${r.touched.length} أمر — إقفال ${r.closed.length}`);
+        ui.lastVouchers = r; m.close(); ui.page = 'po'; ui.poTab = 'orders'; commit(); await saveNow(); voucherResult(r);
+      }; }
+    });
+  }
+  function voucherResult(r) {
+    const vrow = l => ({ vno: l.vno, date: l.date, amount: l.amount, cur: l.cur, sup: l.supplier, center: l.center, lc: l.lc, miss: (l.missing || []).join('، '), desc: l.desc });
+    const vcols = [{ k: 'vno', h: 'السند' }, { k: 'date', h: 'التاريخ' }, { k: 'amount', h: 'المبلغ', n: true, d: 2 }, { k: 'cur', h: 'العملة' }, { k: 'sup', h: 'كود المورد' }, { k: 'center', h: 'CO' }, { k: 'desc', h: 'البيان', cls: 'wrap' }];
+    modal({
+      title: 'نتيجة استيراد سندات الصرف', size: 'wide',
+      body: `<div class="banner ok"><span class="grow">${fmt(r.added)} دفعة جديدة على ${fmt(r.touched.length)} أمر — مسدد بالكامل (إقفال) ${fmt(r.closed.length)} — تكاليف إضافية ${fmt(r.extras)}${r.dup ? ` — مسجل قبل (ما تكرر) ${fmt(r.dup)}` : ''}</span></div>
+        ${r.over.length ? `<h3>⚠ مدفوعها أكثر من إجماليها (${fmt(r.over.length)}) — سند مكرر أو رسوم شحن ناقصة في أونكس</h3>${table('vOver', [{ k: 'no', h: 'الأمر' }, { k: 'totalSar', h: 'الإجمالي ريال', n: true }, { k: 'paidSar', h: 'المدفوع ريال', n: true }, { k: 'd', h: 'الفرق', n: true, v: x => x.paidSar - x.totalSar }], r.over, { short: true, nofilter: true, onRow: x => poModal(x.no) })}` : ''}
+        ${r.missing.length ? `<h3>أوامر مكتوبة في البيان ومو عندنا (${fmt(r.missing.length)})</h3>${table('vMiss', [{ k: 'miss', h: 'رقم الأمر' }].concat(vcols), r.missing.map(vrow), { short: true, nofilter: true })}` : ''}
+        ${r.noPo.length ? `<h3>أسطر بدون رقم أمر (${fmt(r.noPo.length)}) — اعتمادات ودفعات من الحساب</h3>${table('vNoPo', [{ k: 'lc', h: 'الاعتماد' }].concat(vcols), r.noPo.map(vrow), { short: true, nofilter: true })}` : ''}`,
+      foot: `<button class="primary" data-close>تم</button>`
+    });
+  }
   async function bulkImportFiles() {
     const can1 = can('po_import'), can2 = can('po_payments'), can3 = can('shipping');
     if (!can1 && !can2 && !can3) return deny('po_import');
@@ -1553,9 +1590,10 @@
     catch (e) { return toast('تعذر قراءة الملفات: ' + e.message, 'bad'); }
     if (!files || !files.length) return;
     const items = files.map(f => Object.assign({ f }, detectFileKind(f)));
-    const permOk = k => k === 'po' ? can1 : k === 'poPay' || k === 'docs' ? can2 : (k === 'clearer' || k === 'track') ? can3 : true;
+    const permOk = k => k === 'po' ? can1 : k === 'poPay' || k === 'docs' || k === 'vouchers' ? can2 : (k === 'clearer' || k === 'track') ? can3 : true;
     const count = it => {
       if (it.kind === 'clearer') return I.parseClearerReport(it.f.sheets, db).length + ' معاملة';
+      if (it.kind === 'vouchers') return fmt(it.f.sheets[0].vouchers.length) + ' سطر سندات';
       if (!it.det || !(it.kind in { po: 1, poPay: 1, track: 1 })) return '';
       const key = it.kind === 'track' ? (['poNo', 'blNo', 'containerNo'].find(k => it.det.map[k] >= 0) || 'poNo') : 'poNo';
       return I.rowsToRecords(it.f.sheets[it.si].rows, it.det.row, it.det.map, key).length + ' سطر';
@@ -1576,23 +1614,27 @@
       foot: `<button class="primary" data-ok>تطبيق التحديث</button><button data-close>إلغاء</button>`,
       onMount: m => {
         m.q('[data-ok]').onclick = async () => {
-          m.qa('[data-bk]').forEach(sel => { const it = items[+sel.dataset.bk]; const k = sel.value; if (k !== it.kind) Object.assign(it, k === 'clearer' || k === 'skip' ? { kind: k } : Object.assign(detectFileKind(it.f), { kind: k })); });
+          m.qa('[data-bk]').forEach(sel => { const it = items[+sel.dataset.bk]; const k = sel.value; if (k !== it.kind) Object.assign(it, k === 'clearer' || k === 'skip' || k === 'vouchers' ? { kind: k } : Object.assign(detectFileKind(it.f), { kind: k })); });
           for (const it of items) {
             if (it.kind === 'skip') continue;
             if (!permOk(it.kind)) return toast(`ما عندك صلاحية لـ «${BULK_KINDS[it.kind]}»`, 'bad');
-            if (it.kind !== 'clearer' && !it.det) { const d = { po: 'po', poPay: 'poPay', track: 'track', docs: 'docs' }[it.kind]; const sh = it.f.sheets[0]; it.si = 0; it.det = I.detectHeader(sh.rows, d); }
+            if (it.kind !== 'clearer' && it.kind !== 'vouchers' && !it.det) { const d = { po: 'po', poPay: 'poPay', track: 'track', docs: 'docs' }[it.kind]; const sh = it.f.sheets[0]; it.si = 0; it.det = I.detectHeader(sh.rows, d); }
           }
           await saveNow(); await api.snapshot('before-bulk-import');
           const day = m.q('#bk_date').value || today(), partyId = m.q('#bk_party').value;
           m.close();
           const out = []; const unmapped = {}; let telex = [];
-          for (const kind of ['po', 'poPay', 'docs', 'clearer', 'track']) {
+          for (const kind of ['po', 'poPay', 'docs', 'vouchers', 'clearer', 'track']) {
             for (const it of items.filter(x => x.kind === kind)) {
               try {
                 if (kind === 'po') {
                   const recs = I.rowsToRecords(it.f.sheets[it.si].rows, it.det.row, it.det.map, 'poNo');
                   const r = I.applyPOs(db, recs, { date: day, user: ui.user.name, file: it.f.name });
                   out.push({ t: `📄 ${it.f.name} — أوامر الشراء`, lines: [`${fmt(r.orders)} أمر (${fmt(r.lines)} سطر)`, r.newOrders.length ? `جديد: ${r.newOrders.join('، ')}` : '', (r.closed.length + r.completed.length) ? `وصل المخزون: ${r.closed.concat(r.completed).join('، ')}` : '', r.reopened.length ? `أعيد فتحها: ${r.reopened.join('، ')}` : '', r.added.length ? `أصناف جديدة «غير مصنف»: ${r.added.map(a => a.code).join('، ')}` : ''] });
+                } else if (kind === 'vouchers') {
+                  const r = I.applyVouchers(db, it.f.sheets[0].vouchers, { user: ui.user.name, file: it.f.name });
+                  ui.lastVouchers = r;
+                  out.push({ t: `📄 ${it.f.name} — سندات الصرف`, lines: [`${fmt(r.added)} دفعة جديدة على ${fmt(r.touched.length)} أمر — مسدد بالكامل (إقفال) ${fmt(r.closed.length)}${r.dup ? ` — مكرر (مسجل قبل) ${fmt(r.dup)}` : ''}`, (r.noPo.length + r.missing.length + r.over.length) ? `للمراجعة: ${fmt(r.noPo.length)} سطر بدون رقم أمر، ${fmt(r.missing.length)} لأوامر مو عندنا، ${fmt(r.over.length)} أمر مدفوعه أكثر من إجماليه — للتفاصيل استورد نفس الملف من زر «💳 استيراد سندات الصرف» (ما يتكرر شي)` : ''] });
                 } else if (kind === 'docs') {
                   const r = I.applyDocs(db, I.rowsToRecords(it.f.sheets[it.si].rows, it.det.row, it.det.map, 'poNo'), { date: today(), user: ui.user.name });
                   out.push({ t: `📄 ${it.f.name} — استلام الأوراق`, lines: [`استلمنا الأوراق: ${fmt(r.yes.length)} أمر${r.no.length ? ` — انلغى ${fmt(r.no.length)}` : ''}`, r.notFound.length ? `أوامر مو عندنا: ${r.notFound.join('، ')}` : ''] });
@@ -2740,6 +2782,7 @@
     partyDel: async el => { const p = db.parties[+el.dataset.i]; if (!await confirmBox(`حذف «${esc(p.name)}»؟`, { ok: 'حذف', danger: true })) return; db.parties.splice(+el.dataset.i, 1); commit(); },
     partyMap: el => statusMapModal(+el.dataset.i),
     poBulkImport: () => bulkImportFiles(),
+    importVouchers: () => importVouchers(),
     tplTrack: () => trackTemplateDialog(),
     cformAdd: el => { db.clearerForm[el.dataset.l].push({ text: 'حالة جديدة', stage: '__none' }); commit(); },
     cformDel: el => { db.clearerForm[el.dataset.l].splice(+el.dataset.i, 1); commit(); },

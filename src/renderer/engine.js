@@ -611,7 +611,7 @@
       const total = value + shipping + extras;
       const totalSar = (value + shipping) * rate + extrasSar;
       const paidSar = (o.payments || []).reduce((a, p) => a + num(p.amount) * (num(p.rate) > 0 ? num(p.rate) : fxRate(db, p.currency || o.currency)), 0);
-      const dueSar = Math.max(0, totalSar - paidSar);
+      const dueSar = o.payClosed ? 0 : Math.max(0, totalSar - paidSar); // «اقفال» في سند الصرف = الأمر مسدد
       const foreign = (db.shipStages || []).length > 0 && isForeign(db, o);
       const plan = foreign ? poPlan(db, o, today) : null;
       const autoEta = plan && plan.eta ? plan.eta : addMonthsDate(o.poDate || o.firstSeen, poLead(db, o));
@@ -619,7 +619,7 @@
       const expShip = plan && o.status === 'open' && !isShipped(o) && !docsOf(o) ? plan.shipPlanned : '';
       const shipLateDays = expShip ? dayDiff(today, expShip) : 0;
       const daysToEta = eta ? dayDiff(eta, today) : null;
-      const payStatus = totalSar <= 0 ? 'غير محدد' : paidSar <= 0.005 ? 'غير مسدد' : paidSar + 0.5 >= totalSar ? 'مسدد' : 'مسدد جزئيًا';
+      const payStatus = o.payClosed ? 'مسدد' : totalSar <= 0 ? 'غير محدد' : paidSar <= 0.005 ? 'غير مسدد' : paidSar + 0.5 >= totalSar ? 'مسدد' : 'مسدد جزئيًا';
       const docs = docsOf(o);
       return {
         no, status: o.status, stage: stageOf(o), stageLabel: STAGE_LABEL[stageOf(o)], mainStatus: mainStatusOf(o, docs), pending: !!o.pendingApproval, docs, shippedManual: o.shippedManual === true, foreign,

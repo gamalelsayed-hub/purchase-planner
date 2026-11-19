@@ -56,8 +56,53 @@ async function readClearerPdf(doc) {
   return recs;
 }
 
+// «تقارير سند الصرف» (سند لكل صفحة): رأس السند (الرقم والتاريخ) + أسطر «يقيد الى حساب»
+// الأعمدة من صف العناوين: رقم الحساب، العملة، الحساب التحليلي، اسم الحساب، البيان، المبلغ، رقم المركز، رقم المرجع، رقم الإعتماد
+const V_HEAD = [['account', /رقم الحساب/], ['cur', /^العملة$/], ['supplier', /الحساب التحلي/], ['name', /اسم الحساب/], ['desc', /^البيان$/], ['amount', /^المبلغ$/], ['center', /رقم المركز/], ['ref', /رقم المرجع/], ['lc', /رقم الإعتماد|رقم الاعتماد/]];
+async function readVoucherPdf(doc) {
+  const out = []; let cols = null, vno = '', date = '', type = '';
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const tc = await page.getTextContent();
+    const items = tc.items.filter(it => clean(it.str)).map(it => ({ s: digits(clean(it.str)), x: it.transform[4] + (it.width || 0) / 2, y: it.transform[5] }));
+    if (p === 1 && !items.some(i => /تقارير سند الصرف/.test(i.s))) return null;
+    const rows = []; items.sort((a, b) => b.y - a.y || b.x - a.x);
+    for (const it of items) { const r = rows.find(l => Math.abs(l.y - it.y) <= 3); if (r) r.items.push(it); else rows.push({ y: it.y, items: [it] }); }
+    rows.sort((a, b) => b.y - a.y);
+    const txt = r => r.items.slice().sort((a, b) => b.x - a.x).map(i => i.s).join(' ');
+    // رأس السند (صفحة التكملة ما لها رأس ← نفس السند)
+    for (const r of rows) {
+      const t = txt(r);
+      if (/رقم السند/.test(t)) { const n = r.items.find(i => /^\d+$/.test(i.s) && !/رقم/.test(i.s)); if (n) vno = n.s; }
+      if (/تاريخ السند/.test(t)) { const d = (t.match(/(\d{2})\/(\d{2})\/(\d{4})/) || []); if (d[0]) date = d[3] + '-' + d[2] + '-' + d[1]; }
+      if (/سند صرف/.test(t)) type = /نقد/.test(t) ? 'نقدي' : /شيك/.test(t) ? 'بنكي - شيك' : 'بنكي - تحويل';
+    }
+    const hi = rows.findIndex(r => r.items.some(i => /رقم الحساب/.test(i.s)) && r.items.some(i => /^البيان$/.test(i.s)));
+    if (hi >= 0) cols = V_HEAD.map(([k, re]) => { const h = rows[hi].items.find(i => re.test(i.s)); return h ? { k, x: h.x } : null; }).filter(Boolean);
+    if (!cols) continue;
+    const colOf = x => cols.reduce((b, c) => !b || Math.abs(c.x - x) < Math.abs(b.x - x) ? c : b, null).k;
+    const endI = rows.findIndex(r => /مدخل السجل|طبع بواسطة/.test(txt(r)));
+    const body = rows.slice(hi >= 0 ? hi + 1 : 0, endI >= 0 ? endI : undefined).filter(r => !/تقارير سند الصرف|شركة ادوات التعمير|ADWAT/.test(txt(r)));
+    let cur = null;
+    for (const r of body) {
+      const acc = r.items.find(i => /^\d{7}$/.test(i.s) && colOf(i.x) === 'account');
+      if (acc) { cur = { vno, date, type, page: p, cells: {} }; out.push(cur); }
+      if (!cur) continue;
+      for (const i of r.items.slice().sort((a, b) => b.x - a.x)) { const k = colOf(i.x); (cur.cells[k] = cur.cells[k] || []).push(i.s); }
+    }
+  }
+  return out.map((l, idx) => {
+    const c = k => (l.cells[k] || []).join(' ').replace(/\s+/g, ' ').trim();
+    const amt = (c('amount').match(/\d{1,3}(?:,\d{3})*(?:\.\d+)?/) || [])[0] || (c('desc').match(/\d{1,3}(?:,\d{3})+\.\d{2}/) || [])[0] || '0';
+    return { vno: l.vno, date: l.date, type: l.type, line: idx, account: c('account'), cur: (c('cur').match(/[A-Z]{3}/) || [])[0] || '', supplier: (c('supplier').match(/\d{4,6}/) || [])[0] || '', name: c('name'),
+      desc: c('desc'), amount: Number(amt.replace(/,/g, '')), center: (c('center').match(/\d{4}/) || [])[0] || '', ref: c('ref'), lc: c('lc') };
+  });
+}
+
 async function readPdfTable(data) {
   const doc = await pdfjs.getDocument({ data: new Uint8Array(data), disableFontFace: true, useSystemFonts: false, isEvalSupported: false }).promise;
+  const vch = await readVoucherPdf(doc);
+  if (vch) return { sheets: [{ name: 'سندات الصرف', rows: [['تقارير سند الصرف']], vouchers: vch }] };
   const clr = await readClearerPdf(doc);
   if (clr.length) return { sheets: [{ name: 'تقرير المخلّص', rows: [['بيان المعاملات تحت التخليص', 'رقم البوليصه', 'رقم الحاوية']], clearerPdf: clr }] };
   const out = [];

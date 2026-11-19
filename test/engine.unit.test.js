@@ -396,4 +396,26 @@ assert.strictEqual(db.po.orders.K1.track.stage, 'emptyReturned'); assert.ok(db.p
   dr[1][1] = 'لا'; I.applyDocs(d9, I.rowsToRecords(dr, dd.row, dd.map, 'poNo'), {}); assert.strictEqual(ms(), 'صادر');
 }
 
+// سندات الصرف: دفعة برقم الأمر، «اقفال» = مسدد، الرسوم = تكلفة إضافية، وما تتكرر
+{
+  const d10 = E.emptyDb();
+  d10.po.orders.W1 = { no: 'W1', status: 'open', currency: 'USD', lines: [{ code: 'x', qty: 1, value: 1000, remaining: 1 }], payments: [{ id: 's1', amount: 1000, currency: 'USD', source: 'sheet' }], shipping: 200 };
+  d10.po.orders.W2 = { no: 'W2', status: 'open', currency: 'USD', lines: [{ code: 'x', qty: 1, value: 500, remaining: 1 }], payments: [], shipping: 0 };
+  const L = [
+    { vno: '10', date: '2026-10-01', line: 0, cur: 'USD', amount: 300, desc: 'دفعه عربون لامر شراء W1' },
+    { vno: '11', date: '2026-11-01', line: 1, cur: 'USD', amount: 150, desc: 'اجور شحن لامر شراء رقم W1' },
+    { vno: '11', date: '2026-11-01', line: 2, cur: 'USD', amount: 700, desc: 'اقفال امر شراء W1 بعد خصم' },
+    { vno: '12', date: '2026-11-02', line: 3, cur: 'USD', amount: 20, desc: 'رسوم مخاطر حرب امر شراء W2' },
+    { vno: '13', date: '2026-11-03', line: 4, cur: 'USD', amount: 9000, desc: 'اقفال اعتماد 25224' }
+  ].map(l => Object.assign(l, { desc: l.desc.replace('W1', '61001').replace('W2', '61002') }));
+  d10.po.orders['61001'] = Object.assign(d10.po.orders.W1, { no: '61001' }); d10.po.orders['61002'] = Object.assign(d10.po.orders.W2, { no: '61002' }); delete d10.po.orders.W1; delete d10.po.orders.W2;
+  const r = I.applyVouchers(d10, L, { user: 'x' });
+  assert.strictEqual(r.added, 3); assert.strictEqual(r.extras, 1); assert.strictEqual(r.noPo.length, 1);
+  const s = no => E.poSummary(d10, '2026-11-05').find(x => x.no === no);
+  assert.strictEqual(s('61001').payStatus, 'مسدد'); assert.strictEqual(s('61001').dueSar, 0, 'closing settles even if paid < total');
+  assert.ok(!d10.po.orders['61001'].payments.some(p => p.source === 'sheet'), 'sheet payments replaced by vouchers');
+  assert.strictEqual(s('61002').payStatus, 'غير مسدد'); assert.strictEqual(d10.po.orders['61002'].extraCosts.length, 1);
+  const r2 = I.applyVouchers(d10, L, {}); assert.strictEqual(r2.added, 0); assert.strictEqual(r2.dup, 4);
+}
+
 console.log('✓ all engine unit tests passed');

@@ -516,6 +516,7 @@
       const sd = toDate(r.shipDate); if (sd) o.shipDate = sd;
       { const dv = docsVal(r.docs); if (dv != null) setDocs(o, dv, { date: day, user }); }
       o.payments = (o.payments || []).filter(p => p.source !== 'sheet');
+      if (o.payments.some(p => p.source === 'voucher')) continue; // السداد من سندات الصرف (المرجع)
       const st = String(r.status || '').trim();
       const notPaid = /لم|غير|not|unpaid/i.test(st);
       const paid = !notPaid && /سدد|السداد|مدفوع|paid/i.test(st);
@@ -539,6 +540,53 @@
       }
     }
     po.imports.push({ at: new Date().toISOString(), date: day, kind: 'poPay', file: file || '', user: user || '', orders: res.orders, newOrders: res.created.length });
+    return res;
+  }
+
+  // ---------- سندات الصرف (تقارير سند الصرف PDF من أونكس) ----------
+  // كل سطر ← دفعة على الأمر المكتوب رقمه في البيان (بعملة السطر). «اقفال» = سداد كامل، أجور الشحن = دفعة شحن،
+  // رسوم البنك ومخاطر الحرب = تكلفة إضافية. نفس السند ما ينسجل مرتين (رقم السند + تاريخه + السطر).
+  const voucherKind = t => /مخاطر|تأمين|رسوم|عمولة|عموله|سويفت/.test(t) ? 'fee' : /اجور|أجور|شحن/.test(t) ? 'شحن' : /اقفال|إقفال/.test(t) ? 'سداد كامل' : 'دفعة';
+  function voucherPlan(db, lines) {
+    const orders = (db.po && db.po.orders) || {};
+    return lines.map(l => {
+      const desc = String(l.desc || '');
+      const nums = [...new Set((desc.match(/\d{5}/g) || []))];
+      const pos = nums.filter(n => orders[n]);
+      const missing = /امر|أمر/.test(desc) ? nums.filter(n => !orders[n] && /^[56]\d{4}$/.test(n)) : [];
+      const lc = (desc.match(/اعتماد\s*(?:مؤجل\s*)?(?:رقم\s*)?(\d{5})/) || [])[1] || '';
+      return Object.assign({}, l, { pos, missing, lc, kind: voucherKind(desc) });
+    });
+  }
+  function applyVouchers(db, lines, { user, file } = {}) {
+    const E = (typeof module !== 'undefined' && module.exports) ? require('./engine.js') : root.Engine;
+    const po = ensurePo(db), plan = voucherPlan(db, lines);
+    const res = { lines: plan.length, added: 0, dup: 0, extras: 0, touched: new Set(), closed: new Set(), noPo: [], missing: [], over: [] };
+    for (const l of plan) {
+      if (!l.pos.length) { (l.missing.length ? res.missing : res.noPo).push(l); continue; }
+      l.pos.forEach((no, k) => {
+        const o = po.orders[no], id = 'V' + l.vno + '-' + l.date + '-' + l.line + (l.pos.length > 1 ? '-' + k : '');
+        const share = +(l.amount / l.pos.length).toFixed(2), note = 'سند صرف ' + l.vno + ' — ' + l.desc;
+        res.touched.add(no);
+        if (l.kind === 'fee') {
+          o.extraCosts = o.extraCosts || [];
+          if (o.extraCosts.some(x => x.id === id)) { res.dup++; return; }
+          o.extraCosts.push({ id, date: l.date, desc: l.desc.slice(0, 80), amount: share, currency: l.cur || o.currency, note: 'سند صرف ' + l.vno, by: user || '', source: 'voucher' });
+          res.extras++; return;
+        }
+        o.payments = o.payments || [];
+        if (o.payments.some(p => p.id === id)) { res.dup++; return; }
+        o.payments.push({ id, date: l.date, amount: share, currency: l.cur || o.currency, kind: l.kind, note, source: 'voucher', voucher: l.vno, by: user || '' });
+        if (l.kind === 'سداد كامل') { o.payClosed = true; res.closed.add(no); }
+        res.added++;
+      });
+    }
+    // السندات هي المرجع: دفعات «من شيت السداد» على نفس الأوامر تنشال عشان ما تنحسب مرتين
+    for (const no of res.touched) { const o = po.orders[no]; o.payments = (o.payments || []).filter(p => p.source !== 'sheet'); }
+    const sum = E.poSummary(db);
+    for (const s of sum) if (res.touched.has(s.no) && s.totalSar > 0 && s.paidSar > s.totalSar * 1.02) res.over.push({ no: s.no, paidSar: s.paidSar, totalSar: s.totalSar });
+    po.imports.push({ at: new Date().toISOString(), date: new Date().toISOString().slice(0, 10), kind: 'vouchers', file: file || '', user: user || '', orders: res.touched.size, newOrders: 0 });
+    res.touched = [...res.touched]; res.closed = [...res.closed];
     return res;
   }
 
@@ -872,7 +920,7 @@
     if (/يورو|eur/i.test(t)) return 'EUR';
     return '';
   }
-  const Importers = { applyDocs, docsVal, FLAG_COLS, parseClearerPdf, defaultClearerForm, isClearerReport, parseClearerReport, DEFAULT_CLEARER_MAP, applyTrack, mapTrackStatus, currencyFromHeader, KINDS, applyPOs, applyPOPay, toDate, curCode, detectHeader, rowsToRecords, applyItems, applySales, applyStock, applyTransit, autoAddItems, importLegacy, isLegacyWorkbook, syncGroups, parseActive };
+  const Importers = { applyVouchers, voucherPlan, applyDocs, docsVal, FLAG_COLS, parseClearerPdf, defaultClearerForm, isClearerReport, parseClearerReport, DEFAULT_CLEARER_MAP, applyTrack, mapTrackStatus, currencyFromHeader, KINDS, applyPOs, applyPOPay, toDate, curCode, detectHeader, rowsToRecords, applyItems, applySales, applyStock, applyTransit, autoAddItems, importLegacy, isLegacyWorkbook, syncGroups, parseActive };
   if (typeof module !== 'undefined' && module.exports) module.exports = Importers;
   else root.Importers = Importers;
 })(typeof window !== 'undefined' ? window : globalThis);
