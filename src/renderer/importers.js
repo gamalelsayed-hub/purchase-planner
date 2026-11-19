@@ -433,6 +433,9 @@
       if (isImportOffice(o.costCenter)) {
         o.track = o.track || { history: [], containers: [] };
         o.track.forwarder = ensureOffice(db, o.costCenter);
+      }
+      // أمر استيراد (عن طريق CO، أو كل الأوامر خارجية حسب الإعداد) ← بعملة الاستيراد (الدولار)، إلا إذا تغيرت يدويًا
+      if (isImportOffice(o.costCenter) || !db.settings || db.settings.allPoForeign !== false) {
         const ic = importCurrency(db);
         if (ic && !first.currency && !o.currencyManual) o.currency = ic;
       }

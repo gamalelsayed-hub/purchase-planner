@@ -131,6 +131,7 @@
       extraBasis: 'avg_std', // avg_std = (المتوسط + الانحراف) ، avg = المتوسط فقط
       classifyScope: 'all', // all = كل الأصناف ، active = النشطة فقط
       cashHorizonDays: 60, // أفق الكاش المطلوب (يوم)
+      allPoForeign: true, // كل أوامر الشراء استيراد خارجي (بمراحل شحن، وبعملة الاستيراد)
       freshDays: 7, // قائمة المدخلات: البيانات الأسبوعية تعتبر محدثة خلال كم يوم
       shipTransitDays: 30, // مدة الشحن من تاريخ الشحن حتى الوصول (يوم)
       defaultFreeDays: 14, // أيام السماح للحاوية من وصول الميناء حتى تسليمها فارغة (إذا الوكيل ما له مدة خاصة)
@@ -481,6 +482,7 @@
   const baseCode = db => ((db.currencies || [])[0] || {}).code || 'SAR';
   // أمر خارجي = عليه متابعة، أو عملته أجنبية، أو أحد أصنافه من نوع عملته أجنبية
   function isForeign(db, o) {
+    if (!db.settings || db.settings.allPoForeign !== false) return true;
     if (o.track) return true;
     const base = baseCode(db);
     if (o.currency && o.currency !== base) return true;

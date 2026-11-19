@@ -170,6 +170,13 @@
   function recompute() { res = E.compute(db); }
   function commit() { recompute(); if (!ui.readOnly) { dirty = true; scheduleSave(); } render(); }
 
+  function toForeignCurrency(d) {
+    const base = (d.currencies[0] || {}).code || 'SAR';
+    const ic = ((d.types || []).find(t => t.currency && t.currency !== base) || {}).currency || ((d.currencies || []).find(c => c.code !== base) || {}).code;
+    if (!ic) return 0; let n = 0;
+    for (const o of Object.values((d.po && d.po.orders) || {})) if ((!o.currency || o.currency === base) && !o.currencyManual) { o.currency = ic; n++; }
+    return n;
+  }
   function migrate(d) {
     const base = E.emptyDb();
     d.settings = Object.assign(base.settings, d.settings || {});
@@ -207,6 +214,8 @@
       for (const u of d.users) if (Array.isArray(u.pages)) { if (u.pages.includes('ship') && !u.pages.includes('po')) u.pages.push('po'); u.pages = u.pages.filter(x => x !== 'ship'); }
       d.meta.planV = 1;
     }
+    // كل أوامر الشراء خارجية: الأوامر بالريال (غير المعدّلة يدويًا) ← عملة الاستيراد
+    if ((d.meta.foreignV || 0) < 1) { if (d.settings.allPoForeign !== false) toForeignCurrency(d); d.meta.foreignV = 1; }
     // قائمة المخازن (رقم ← اسم) — تبدأ من أرقام المخازن الموجودة في أوامر الشراء
     if (!Array.isArray(d.warehouses)) d.warehouses = [{ code: '1002', name: 'المركزي' }, { code: '1101', name: 'الخمرة' }, { code: '1201', name: 'الرياض' }];
     for (const o of Object.values((d.po && d.po.orders) || {})) for (const l of o.lines || []) { const c = String(l.warehouse || '').trim(); if (c && !d.warehouses.some(w => w.code === c)) d.warehouses.push({ code: c, name: '' }); }
@@ -1393,7 +1402,7 @@
     { k: 'no', h: 'رقم الأمر', fixed: true, f: o => `<b>${esc(o.no)}</b>${o.pending ? ' <span class="pill bad">بانتظار الاعتماد</span>' : ''}` },
     { k: 'act', h: '', nosort: true, fixed: true, f: o => o.pending ? (can('approve') ? `<button class="sm ok" data-act="poApprove" data-k="${esc(o.no)}">اعتماد</button>` : '') : `${o.foreign && !o.closed && o.status === 'open' && can('shipping') ? `<button class="sm" data-act="shipNext" data-k="${esc(o.no)}" title="المرحلة التالية">التالية ◀</button> ` : ''}${o.status === 'open' ? `<button class="sm ok" data-act="poQuickRecv" data-k="${esc(o.no)}" title="تعليم الأمر وصل المستودع">وصل</button> ` : ''}${o.dueSar > 0.5 ? `<button class="sm" data-act="poQuickPay" data-k="${esc(o.no)}" title="تسجيل دفعة">سداد</button>` : ''}` },
     { k: 'mainStatus', h: 'الحالة', def: true, sv: o => E.MAIN_STATUSES.indexOf(o.mainStatus), v: o => o.mainStatus, f: o => mainPill(o) },
-    { k: 'stageIdx', h: 'المرحلة', def: true, sv: o => o.stageIdx, v: o => o.foreign ? (o.stageName || '') : 'محلي', f: o => o.foreign ? trackPill(o.trackPill) + (o.daysIn != null && !o.closed ? ` <span class="small" style="${o.late ? 'color:var(--bad);font-weight:700' : ''}">${fmt(o.daysIn)}/${fmt(o.stageDays || 0)} يوم</span>` : '') : '<span class="small">محلي</span>' },
+    { k: 'stageIdx', h: 'المرحلة', def: true, sv: o => o.stageIdx, v: o => o.foreign ? (o.stageName || '') : 'محلي (بدون مراحل شحن)', f: o => o.foreign ? trackPill(o.trackPill) + (o.daysIn != null && !o.closed ? ` <span class="small" style="${o.late ? 'color:var(--bad);font-weight:700' : ''}">${fmt(o.daysIn)}/${fmt(o.stageDays || 0)} يوم</span>` : '') : '<span class="small">محلي (بدون مراحل شحن)</span>' },
     { k: 'poDate', h: 'تاريخ الأمر', def: true },
     { k: 'supplier', h: 'المورد', def: true }, { k: 'costCenter', h: 'مركز التكلفة (كما في النظام)', cls: 'wrap' }, { k: 'warehouse', h: 'المخزن', def: true, v: o => whLabel(o.warehouse) }, { k: 'forwarder', h: 'CO', def: true }, { k: 'clearer', h: 'المخلّص', def: true },
     { k: 'blNo', h: 'البوليصة', def: true, f: o => esc(o.blNo) + (o.docType ? ` <span class="small">(${esc(o.docType)})</span>` : '') },
@@ -2154,7 +2163,8 @@
       ${db.currencies.map((c, i) => `<tr><td><input class="inp" style="width:80px" data-chg="cur" data-i="${i}" data-k="code" value="${esc(c.code)}"></td><td><input class="inp" style="width:120px" data-chg="cur" data-i="${i}" data-k="name" value="${esc(c.name)}"></td><td><input class="inp" style="width:100px" type="number" step="any" min="0" data-chg="cur" data-i="${i}" data-k="rate" value="${c.rate}"></td><td>${i ? `<button class="sm danger" data-act="delCur" data-i="${i}">حذف</button>` : '<span class="small">الأساسية</span>'}</td></tr>`).join('')}
       </tbody></table><button class="sm" data-act="addCur" style="margin-top:8px">+ إضافة عملة</button>
       <div class="form f4" style="margin-top:12px"><label class="f">أفق الكاش المطلوب (يوم)<input class="inp" type="number" step="1" min="1" data-chg="set" data-k="cashHorizonDays" value="${esc(s.cashHorizonDays)}"></label>
-        <label class="f" style="grid-column:span 3">خصم أوامر الشراء المفتوحة من الطلب كبضاعة بالطريق<select class="inp" data-chg="setBool" data-k="poAsTransit"><option value="0" ${!s.poAsTransit ? 'selected' : ''}>مقفل — أوامر الشراء للمتابعة والكاش فقط، والطلب يعتمد على البضاعة بالطريق اليدوية</option><option value="1" ${s.poAsTransit ? 'selected' : ''}>مفعّل — الكمية المتبقية في الأوامر المفتوحة تنخصم من الطلب تلقائيًا</option></select></label></div>
+        <label class="f">نوع أوامر الشراء<select class="inp" data-chg="setBool" data-k="allPoForeign"><option value="1" ${s.allPoForeign !== false ? 'selected' : ''}>كلها استيراد خارجي (بالدولار ومراحل الشحن)</option><option value="0" ${s.allPoForeign === false ? 'selected' : ''}>فيها محلي (حسب نوع الصنف وCO)</option></select></label>
+        <label class="f" style="grid-column:span 2">خصم أوامر الشراء المفتوحة من الطلب كبضاعة بالطريق<select class="inp" data-chg="setBool" data-k="poAsTransit"><option value="0" ${!s.poAsTransit ? 'selected' : ''}>مقفل — أوامر الشراء للمتابعة والكاش فقط، والطلب يعتمد على البضاعة بالطريق اليدوية</option><option value="1" ${s.poAsTransit ? 'selected' : ''}>مفعّل — الكمية المتبقية في الأوامر المفتوحة تنخصم من الطلب تلقائيًا</option></select></label></div>
     </div>
 
     <div class="card"><h2>الفترات الاستثنائية المؤقتة</h2>
@@ -2982,6 +2992,7 @@
     }
     if (k === 'setBool') {
       s[el.dataset.k] = el.value === '1';
+      if (el.dataset.k === 'allPoForeign') { log(s.allPoForeign ? 'كل أوامر الشراء خارجية' : 'أوامر الشراء فيها محلي'); if (s.allPoForeign) toForeignCurrency(db); return commit(); }
       log((s[el.dataset.k] ? 'تفعيل' : 'إيقاف') + ' خصم أوامر الشراء من الطلب');
       if (s.poAsTransit && db.transit.length && Object.values(db.po.orders).some(o => o.status === 'open' && (o.lines || []).length)) toast(`انتبه: يوجد ${fmt(db.transit.length)} سطر بضاعة بالطريق يدوي — إذا كانت نفس أوامر الشراء امسحها حتى لا تنخصم مرتين`, 'bad');
       return commit();

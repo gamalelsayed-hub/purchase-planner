@@ -12,6 +12,7 @@ close(E.normsinv(0.75), 0.6744897501960817, 'Z 75%');
 function baseDb() {
   const db = E.emptyDb();
   db.settings.lastMonth = '2026-06';
+  db.settings.allPoForeign = false; // الاختبارات القديمة فيها أوامر محلية
   db.items = [
     { code: 'A1', name: 'صنف كبير', baseUnit: 'حبه', purchaseUnit: 'كرتون', units: [{ name: 'كرتون', factor: 10 }], group: 'g', type: 'خارجي', active: true, extraOverride: null, leadOverride: null, refCost: 2 },
     { code: 'B1', name: 'صنف متوسط', baseUnit: 'حبه', purchaseUnit: '', units: [], group: 'g', type: 'مصنع', active: true, extraOverride: null, leadOverride: null, refCost: 1 },
@@ -365,6 +366,18 @@ assert.strictEqual(db.po.orders.K1.track.stage, 'emptyReturned'); assert.ok(db.p
   // نفس العمود في شيت الشحن والسداد
   I.applyPOPay(d7, [{ poNo: 'A2', docs: 'نعم' }], { date: '2026-11-19' });
   assert.strictEqual(ms('A2'), 'مشحون — استلمنا الأوراق');
+}
+
+// الإعداد الافتراضي: كل أوامر الشراء خارجية — حتى «مركز عام» يمشي بمراحل الشحن وبالدولار
+{
+  const d8 = E.emptyDb(); d8.shipStages = E.defaultShipStages();
+  assert.strictEqual(d8.settings.allPoForeign, true);
+  const hdr = ['مركز التكلفة', 'الكمية المتبقية', 'كمية الفاتورة', 'سعر امر الشراء', 'كمية امر الشراء', 'المخزن', 'الوحدة', 'رقم الصنف', 'رقم الأمر', 'تاريخ امر الشراء'];
+  const rows = [hdr, ['مركز عام 8001', 5, 0, 100, 5, 1101, 'حبه', 'C9', 'G1', '01/08/2026']];
+  const dh = I.detectHeader(rows, 'po');
+  I.applyPOs(d8, I.rowsToRecords(rows, dh.row, dh.map, 'poNo'), { date: '2026-08-02' });
+  assert.strictEqual(d8.po.orders.G1.currency, 'USD'); assert.ok(E.isForeign(d8, d8.po.orders.G1));
+  assert.ok(!d8.parties.some(p => /مركز عام/.test(p.name)), 'general cost center is still not a CO');
 }
 
 console.log('✓ all engine unit tests passed');
