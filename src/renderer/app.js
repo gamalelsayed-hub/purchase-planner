@@ -1296,7 +1296,7 @@
       gap('أوامر مشحونة بدون قيمة شحن', n(o => o.shipped && !(num(o.shipping) > 0)), 'warn', 'من شيت المحاسب أو شاشة الأمر.', 'shipc', 'الشحن فارغ', SHIPPED);
       gap('مطلوب تلكس منّا', n(o => o.needTelex), 'bad', 'أرسل التلكس للمخلّص، وارفقه في الأمر.', 'alert', 'مطلوب تلكس');
       gap('حاويات عدّت أيام السماح', n(o => o.demurrageOverdue), 'bad', 'سلّم الحاوية فارغة وسجّل التاريخ في شاشة الأمر.', 'alert', 'غرامة حاويات');
-      gap('أوامر متأخرة في مرحلتها', n(o => o.late && !o.closed), 'warn', 'تابع مع الجهة المسؤولة وحدّث المرحلة.', 'alert', 'متأخر في مرحلته');
+      if (showStages()) gap('أوامر متأخرة في مرحلتها', n(o => o.late && !o.closed), 'warn', 'تابع مع الجهة المسؤولة وحدّث المرحلة.', 'alert', 'متأخر في مرحلته');
     }
     if (canSee('settings')) rows.push({ grp: 'إعدادات تراجعها', name: 'أسعار الصرف', src: 'الإعدادات ← العملات', last: db.currencies.filter(c => num(c.rate) !== 1).map(c => `${c.name} ${c.rate}`).join(' — ') || '—', at: meta.ratesAt, st: meta.ratesAt && ageOf(meta.ratesAt) <= 31 ? 'ok' : 'warn', note: meta.ratesAt ? '' : 'ما انراجعت', how: 'راجعها كل شهر، واضغط «تمت المراجعة».', act: 'ratesOk', btn: 'تمت المراجعة' });
     return rows;
@@ -1344,7 +1344,10 @@
   // ---------- أوامر الشراء: شاشة موحدة (المتابعة + السداد + المعاملات الخارجية) ----------
   const curName = c => (db.currencies.find(x => x.code === c) || { name: c }).name;
   const ALERTS = ['متأخر في مرحلته', 'متأخر عن الخطة', 'تأخر الشحن', 'مطلوب تلكس', 'غرامة حاويات', 'قربت أيام السماح', 'بدون تاريخ أمر', 'لا يزال في التقرير'];
-  const MF_GROUPS = [['main', 'الحالة'], ['stage', 'المرحلة'], ['fw', 'CO'], ['cl', 'المخلّص'], ['sup', 'المورد'], ['wh', 'المخزن'], ['pay', 'السداد'], ['cur', 'العملة'], ['shipc', 'قيمة الشحن'], ['pod', 'تاريخ الأمر'], ['bl', 'رقم البوليصة'], ['alert', 'تنبيهات']];
+  // مراحل المخلّص للاستعراض فقط — مخفية إلا إذا ضغطت «إظهار مراحل المخلّص» (ينحفظ على الجهاز)
+  const showStages = () => { try { return localStorage.getItem('pp_show_stages') === '1'; } catch (e) { return false; } };
+  const mfGroups = () => MF_GROUPS.filter(([g]) => g !== 'stage' || showStages());
+  const MF_GROUPS = [['main', 'الحالة'], ['stage', 'مراحل المخلّص'], ['fw', 'CO'], ['cl', 'المخلّص'], ['sup', 'المورد'], ['wh', 'المخزن'], ['pay', 'السداد'], ['cur', 'العملة'], ['shipc', 'قيمة الشحن'], ['pod', 'تاريخ الأمر'], ['bl', 'رقم البوليصة'], ['alert', 'تنبيهات']];
   const mfState = () => { const f = ui.f.m || (ui.f.m = { main: ['بانتظار الاعتماد', 'صادر', 'مشحون — بدون أوراق', 'مشحون — استلمنا الأوراق'], stage: [], fw: [], cl: [], sup: [], pay: [], cur: [], alert: [], q: '' }); MF_GROUPS.forEach(([g]) => { if (!Array.isArray(f[g])) f[g] = []; }); return f; };
   // كل الأوامر بكل المعلومات (السداد + المتابعة + الخطة) في سطر واحد
   function masterAll() { return memo('master', masterAllRaw); }
@@ -1353,7 +1356,7 @@
     return poSum().map(o => {
       const t = ts.get(o.no) || {}, po = db.po.orders[o.no];
       const alerts = [];
-      if (t.late && o.foreign && o.status === 'open') alerts.push('متأخر في مرحلته');
+      if (showStages() && t.late && o.foreign && o.status === 'open') alerts.push('متأخر في مرحلته');
       if (o.variance > 0 && o.status === 'open') alerts.push('متأخر عن الخطة');
       if (o.shipLate) alerts.push('تأخر الشحن');
       if (t.needTelex) alerts.push('مطلوب تلكس');
@@ -1375,7 +1378,7 @@
   function masterRows(except) {
     const f = mfState(), q = (f.q || '').trim().toLowerCase();
     return masterAll().filter(o => {
-      for (const [g] of MF_GROUPS) { if (g === except || !f[g].length) continue; const vs = mfValue(g, o); if (!vs.some(v => f[g].includes(v))) return false; }
+      for (const [g] of mfGroups()) { if (g === except || !f[g].length) continue; const vs = mfValue(g, o); if (!vs.some(v => f[g].includes(v))) return false; }
       if (q && !(o.no.toLowerCase().includes(q) || o.blNo.toLowerCase().includes(q) || o.supplier.toLowerCase().includes(q) || o.forwarder.toLowerCase().includes(q) || o.clearer.toLowerCase().includes(q) || o.costCenter.toLowerCase().includes(q) || o.note.toLowerCase().includes(q) ||
         o.containers.some(c => c.no.toLowerCase().includes(q)) || (db.po.orders[o.no].lines || []).some(l => l.code.toLowerCase().includes(q) || String(l.name).toLowerCase().includes(q)))) return false;
       return true;
@@ -1384,8 +1387,8 @@
   // لوحة الفلاتر: خانات تحديد (أكثر من قيمة)، والعدد جنب كل قيمة حسب باقي الفلاتر
   function filterPanel() {
     const f = mfState();
-    const active = MF_GROUPS.filter(([g]) => f[g].length).length + (f.q ? 1 : 0);
-    const groups = MF_GROUPS.map(([g, label]) => {
+    const active = mfGroups().filter(([g]) => f[g].length).length + (f.q ? 1 : 0);
+    const groups = mfGroups().map(([g, label]) => {
       const base = masterRows(g);
       const counts = new Map(); base.forEach(o => mfValue(g, o).forEach(v => counts.set(v, (counts.get(v) || 0) + 1)));
       let vals = g === 'main' ? E.MAIN_STATUSES.slice() : g === 'alert' ? ALERTS.slice() : g === 'stage' ? (db.shipStages || []).map(s => s.name).concat(['— محلي (بدون مراحل) —']) : g === 'pay' ? ['غير مسدد', 'مسدد جزئيًا', 'مسدد', 'غير محدد'] : g === 'shipc' ? ['الشحن مسجّل', 'الشحن فارغ'] : g === 'pod' ? ['تاريخ الأمر موجود', 'تاريخ الأمر فارغ'] : g === 'bl' ? ['البوليصة موجودة', 'البوليصة فارغة'] : [...new Set(masterAll().flatMap(o => mfValue(g, o)))].sort();
@@ -1400,9 +1403,9 @@
   // الأعمدة: تختار اللي تبيه (ينحفظ على جهازك)
   const MASTER_COLS = () => [
     { k: 'no', h: 'رقم الأمر', fixed: true, f: o => `<b>${esc(o.no)}</b>${o.pending ? ' <span class="pill bad">بانتظار الاعتماد</span>' : ''}` },
-    { k: 'act', h: '', nosort: true, fixed: true, f: o => o.pending ? (can('approve') ? `<button class="sm ok" data-act="poApprove" data-k="${esc(o.no)}">اعتماد</button>` : '') : `${o.foreign && !o.closed && o.status === 'open' && can('shipping') ? `<button class="sm" data-act="shipNext" data-k="${esc(o.no)}" title="المرحلة التالية">التالية ◀</button> ` : ''}${o.status === 'open' ? `<button class="sm ok" data-act="poQuickRecv" data-k="${esc(o.no)}" title="تعليم الأمر وصل المستودع">وصل</button> ` : ''}${o.dueSar > 0.5 ? `<button class="sm" data-act="poQuickPay" data-k="${esc(o.no)}" title="تسجيل دفعة">سداد</button>` : ''}` },
+    { k: 'act', h: '', nosort: true, fixed: true, f: o => o.pending ? (can('approve') ? `<button class="sm ok" data-act="poApprove" data-k="${esc(o.no)}">اعتماد</button>` : '') : `${showStages() && o.foreign && !o.closed && o.status === 'open' && can('shipping') ? `<button class="sm" data-act="shipNext" data-k="${esc(o.no)}" title="المرحلة التالية">التالية ◀</button> ` : ''}${o.status === 'open' ? `<button class="sm ok" data-act="poQuickRecv" data-k="${esc(o.no)}" title="تعليم الأمر وصل المستودع">وصل</button> ` : ''}${o.dueSar > 0.5 ? `<button class="sm" data-act="poQuickPay" data-k="${esc(o.no)}" title="تسجيل دفعة">سداد</button>` : ''}` },
     { k: 'mainStatus', h: 'الحالة', def: true, sv: o => E.MAIN_STATUSES.indexOf(o.mainStatus), v: o => o.mainStatus, f: o => mainPill(o) },
-    { k: 'stageIdx', h: 'المرحلة', def: true, sv: o => o.stageIdx, v: o => o.foreign ? (o.stageName || '') : 'محلي (بدون مراحل شحن)', f: o => o.foreign ? trackPill(o.trackPill) + (o.daysIn != null && !o.closed ? ` <span class="small" style="${o.late ? 'color:var(--bad);font-weight:700' : ''}">${fmt(o.daysIn)}/${fmt(o.stageDays || 0)} يوم</span>` : '') : '<span class="small">محلي (بدون مراحل شحن)</span>' },
+    { k: 'stageIdx', h: 'مراحل المخلّص', def: true, sv: o => o.stageIdx, v: o => o.foreign ? (o.stageName || '') : 'محلي (بدون مراحل شحن)', f: o => o.foreign ? trackPill(o.trackPill) + (o.daysIn != null && !o.closed ? ` <span class="small" style="${o.late ? 'color:var(--bad);font-weight:700' : ''}">${fmt(o.daysIn)}/${fmt(o.stageDays || 0)} يوم</span>` : '') : '<span class="small">محلي (بدون مراحل شحن)</span>' },
     { k: 'poDate', h: 'تاريخ الأمر', def: true },
     { k: 'supplier', h: 'المورد', def: true }, { k: 'costCenter', h: 'مركز التكلفة (كما في النظام)', cls: 'wrap' }, { k: 'warehouse', h: 'المخزن', def: true, v: o => whLabel(o.warehouse) }, { k: 'forwarder', h: 'CO', def: true }, { k: 'clearer', h: 'المخلّص', def: true },
     { k: 'blNo', h: 'البوليصة', def: true, f: o => esc(o.blNo) + (o.docType ? ` <span class="small">(${esc(o.docType)})</span>` : '') },
@@ -1422,7 +1425,7 @@
   ];
   function masterColsVisible() {
     let saved = null; try { saved = JSON.parse(localStorage.getItem('pp_po_cols') || 'null'); } catch (e) { /* */ }
-    return MASTER_COLS().filter(c => c.fixed || (saved ? saved.includes(c.k) : c.def));
+    return MASTER_COLS().filter(c => (c.k !== 'stageIdx' || showStages()) && (c.fixed || (saved ? saved.includes(c.k) : c.def)));
   }
   const mainPill = o => {
     const c = { 'بانتظار الاعتماد': 'bad', 'صادر': 'brand', 'مشحون — بدون أوراق': 'warn', 'مشحون — استلمنا الأوراق': 'warn', 'وصل المستودع': 'ok' }[o.mainStatus] || '';
@@ -1469,7 +1472,7 @@
   function poOrdersTab() {
     const rows = masterRows();
     const sum = k => rows.reduce((a, o) => a + (o[k] || 0), 0);
-    return `<div class="toolbar"><span class="pill brand">${fmt(rows.length)} أمر</span><span class="pill brand">الإجمالي ${money(sum('totalSar'))}</span><span class="pill">المدفوع ${money(sum('paidSar'))}</span><span class="pill bad">المتبقي ${money(sum('dueSar'))} ${cur()}</span><span class="pill">حاويات ${fmt(rows.reduce((a, o) => a + o.containers.length, 0))}</span><span class="grow"></span><button class="sm" data-act="poCols">الأعمدة ▾</button></div>
+    return `<div class="toolbar"><span class="pill brand">${fmt(rows.length)} أمر</span><span class="pill brand">الإجمالي ${money(sum('totalSar'))}</span><span class="pill">المدفوع ${money(sum('paidSar'))}</span><span class="pill bad">المتبقي ${money(sum('dueSar'))} ${cur()}</span><span class="pill">حاويات ${fmt(rows.reduce((a, o) => a + o.containers.length, 0))}</span><span class="grow"></span><button class="sm" data-act="toggleStages" title="مراحل المخلّص للاستعراض فقط — ما تغيّر الحالة">${showStages() ? 'إخفاء' : 'إظهار'} مراحل المخلّص</button><button class="sm" data-act="poCols">الأعمدة ▾</button></div>
     ${table('poList', masterColsVisible(), rows, { sort: 'eta', dir: 1, select: o => o.no, bulk: 'bulkPo', onRow: o => poModal(o.no), empty: 'لا توجد أوامر بهذه الفلاتر', foot: { no: 'الإجمالي (' + fmt(rows.length) + ')', totalSar: money(sum('totalSar')), paidSar: money(sum('paidSar')), dueSar: money(sum('dueSar')), value: '', extrasSar: money(sum('extrasSar')) } })}`;
   }
   function poCash() {
@@ -1690,7 +1693,7 @@
         <label class="f">الوصول المتوقع — فارغ = تلقائي (${esc(auto || '—')})<input id="o_eta" type="date" value="${esc(o.etaManual ? o.eta : '')}" ${dis(canSt)}></label>
         <label class="f full">ملاحظة<input id="o_note" value="${esc(o.note || '')}" ${dis(canPay || canSt)}></label>
       </div>
-      ${trackSectionHtml(o)}
+      <details class="stages-box" ${showStages() ? 'open' : ''} style="margin-top:14px"><summary style="cursor:pointer"><b>تحديث مراحل المخلّص</b> <span class="small">(للاستعراض — الحالة تتحدد من أونكس والمحاسب بس)</span></summary>${trackSectionHtml(o)}</details>
       <h3>المرفقات (البوليصة والأوراق)</h3>
       ${table('poAtt', [
         { k: 'name', h: 'الملف', f: a => `<button class="link" data-openatt="${esc(a.file)}">📄 ${esc(a.name)}</button>` }, { k: 'kind', h: 'النوع' }, { k: 'size', h: 'الحجم', v: a => a.size ? fmt(a.size / 1024, 0) + ' KB' : '' },
@@ -2010,11 +2013,11 @@
     modal({
       title: `تعديل جماعي — ${fmt(nos.length)} أمر`, size: 'wide',
       body: `<div class="hint">الخانة الفاضية ما تتغير. التعديل ينطبق على: ${nos.slice(0, 25).map(esc).join('، ')}${nos.length > 25 ? ' …' : ''}</div>
-        ${sec(cS, `<h3>المتابعة الخارجية</h3><div class="form f4">
-          <label class="f">نقل إلى مرحلة<select id="b_stage">${keep}${(db.shipStages || []).map((x, i) => `<option value="${esc(x.id)}">${i + 1}. ${esc(x.name)}</option>`).join('')}</select></label>
+        ${sec(cS, `<h3>CO والمخلّص</h3><div class="form f4">
+          ${showStages() ? `<label class="f">نقل إلى مرحلة المخلّص<select id="b_stage">${keep}${(db.shipStages || []).map((x, i) => `<option value="${esc(x.id)}">${i + 1}. ${esc(x.name)}</option>`).join('')}</select></label>
           <label class="f">تاريخ المرحلة<input id="b_sdate" type="date" value="${today()}"></label>
           <label class="f">ملاحظة المرحلة<input id="b_snote"></label>
-          <label class="chk" style="margin-top:22px"><input type="checkbox" id="b_back"> اسمح بالرجوع لمرحلة سابقة</label>
+          <label class="chk" style="margin-top:22px"><input type="checkbox" id="b_back"> اسمح بالرجوع لمرحلة سابقة</label>` : ''}
           <label class="f">CO<select id="b_fw">${keep}<option value="__clear">— مسح —</option>${fws.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label>
           <label class="f">المخلّص الجمركي<select id="b_cl">${keep}<option value="__clear">— مسح —</option>${cls.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label>
           <label class="f">نوع مستند الشحن<select id="b_doc">${keep}<option>بوليصة</option><option>تلكس</option></select></label>
@@ -2699,6 +2702,7 @@
     bulkPo: el => bulkPoModal(el.dataset.t),
     fonly: el => { const f = mfState(); MF_GROUPS.forEach(([g]) => { f[g] = []; }); f.q = ''; f[el.dataset.g] = [el.dataset.v]; if (el.dataset.main) f.main = el.dataset.main.split('|'); else if (el.dataset.g === 'alert' || el.dataset.g === 'main' && el.dataset.v !== 'وصل المستودع') { if (el.dataset.g === 'alert') f.main = E.MAIN_STATUSES.filter(x => x !== 'وصل المستودع'); } if (ui.tables.poList) ui.tables.poList.page = 0; ui.poTab = ui.poTab === 'cash' ? 'cash' : 'orders'; go('po'); },
     fclear: el => { mfState()[el.dataset.g] = []; render(); },
+    toggleStages: () => { try { localStorage.setItem('pp_show_stages', showStages() ? '0' : '1'); } catch (e) { /* */ } const f = mfState(); f.stage = []; f.alert = f.alert.filter(a => a !== 'متأخر في مرحلته'); render(); },
     fclearAll: () => { const f = mfState(); MF_GROUPS.forEach(([g]) => { f[g] = []; }); f.q = ''; render(); },
     poCols: () => poColsModal(),
     poApprove: async el => { await approvePos([el.dataset.k]); },
