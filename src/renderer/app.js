@@ -237,7 +237,7 @@
     if (t.sort) {
       const col = cols.find(c => c.k === t.sort);
       if (col) {
-        const val = col.v || (r => r[col.k]);
+        const val = col.sv || col.v || (r => r[col.k]); // sv = قيمة الترتيب فقط (التصدير والفلتر بالنص)
         data = data.slice().sort((a, b) => {
           const x = val(a), y = val(b);
           if (x == null && y == null) return 0; if (x == null || x === '') return 1; if (y == null || y === '') return -1;
@@ -1392,8 +1392,8 @@
   const MASTER_COLS = () => [
     { k: 'no', h: 'رقم الأمر', fixed: true, f: o => `<b>${esc(o.no)}</b>${o.pending ? ' <span class="pill bad">بانتظار الاعتماد</span>' : ''}` },
     { k: 'act', h: '', nosort: true, fixed: true, f: o => o.pending ? (can('approve') ? `<button class="sm ok" data-act="poApprove" data-k="${esc(o.no)}">اعتماد</button>` : '') : `${o.foreign && !o.closed && o.status === 'open' && can('shipping') ? `<button class="sm" data-act="shipNext" data-k="${esc(o.no)}" title="المرحلة التالية">التالية ◀</button> ` : ''}${o.status === 'open' ? `<button class="sm ok" data-act="poQuickRecv" data-k="${esc(o.no)}" title="تعليم الأمر وصل المستودع">وصل</button> ` : ''}${o.dueSar > 0.5 ? `<button class="sm" data-act="poQuickPay" data-k="${esc(o.no)}" title="تسجيل دفعة">سداد</button>` : ''}` },
-    { k: 'mainStatus', h: 'الحالة', def: true, v: o => E.MAIN_STATUSES.indexOf(o.mainStatus), f: o => mainPill(o) },
-    { k: 'stageIdx', h: 'المرحلة', def: true, v: o => o.stageIdx, f: o => o.foreign ? trackPill(o.trackPill) + (o.daysIn != null && !o.closed ? ` <span class="small" style="${o.late ? 'color:var(--bad);font-weight:700' : ''}">${fmt(o.daysIn)}/${fmt(o.stageDays || 0)} يوم</span>` : '') : '<span class="small">محلي</span>' },
+    { k: 'mainStatus', h: 'الحالة', def: true, sv: o => E.MAIN_STATUSES.indexOf(o.mainStatus), v: o => o.mainStatus, f: o => mainPill(o) },
+    { k: 'stageIdx', h: 'المرحلة', def: true, sv: o => o.stageIdx, v: o => o.foreign ? (o.stageName || '') : 'محلي', f: o => o.foreign ? trackPill(o.trackPill) + (o.daysIn != null && !o.closed ? ` <span class="small" style="${o.late ? 'color:var(--bad);font-weight:700' : ''}">${fmt(o.daysIn)}/${fmt(o.stageDays || 0)} يوم</span>` : '') : '<span class="small">محلي</span>' },
     { k: 'poDate', h: 'تاريخ الأمر', def: true },
     { k: 'supplier', h: 'المورد', def: true }, { k: 'costCenter', h: 'مركز التكلفة (كما في النظام)', cls: 'wrap' }, { k: 'warehouse', h: 'المخزن', def: true, v: o => whLabel(o.warehouse) }, { k: 'forwarder', h: 'CO', def: true }, { k: 'clearer', h: 'المخلّص', def: true },
     { k: 'blNo', h: 'البوليصة', def: true, f: o => esc(o.blNo) + (o.docType ? ` <span class="small">(${esc(o.docType)})</span>` : '') },
