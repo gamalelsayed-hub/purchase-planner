@@ -96,7 +96,19 @@
         { key: 'supplier', label: 'المورد', aliases: ['المورد', 'supplier'] },
         { key: 'blNo', label: 'رقم البوليصة', aliases: ['رقم البوليصة', 'البوليصة', 'بوليصة الشحن', 'رقم بوليصة الشحن', 'bl', 'blno', 'b/l'] },
         { key: 'shipDate', label: 'تاريخ الشحن', aliases: ['تاريخ الشحن', 'تاريخ البوليصة', 'shipdate', 'etd'] },
+        { key: 'docs', label: 'استلمنا الأوراق', aliases: ['استلمنا الأوراق', 'استلمنا الاوراق', 'استلام الأوراق', 'استلام الاوراق'] },
         { key: 'eta', label: 'تاريخ الوصول المتوقع', aliases: ['تاريخ الوصول المتوقع', 'تاريخ الوصول', 'eta'] },
+        { key: 'note', label: 'ملاحظة', aliases: ['ملاحظة', 'ملاحظات', 'note'] }
+      ]
+    },
+    // شيت استلام الأوراق (المحاسب): رقم الأمر + نعم/لا — الطريقة المعتمدة لـ «مشحون — استلمنا الأوراق»
+    docs: {
+      title: 'استلام الأوراق',
+      fields: [
+        { key: 'poNo', label: 'رقم الأمر', aliases: ['رقم الأمر', 'رقم الامر', 'رقم امر الشراء', 'رقم معاملة العميل', 'امر الشراء', 'po'], required: true },
+        { key: 'docs', label: 'استلمنا الأوراق', aliases: ['استلمنا الأوراق', 'استلمنا الاوراق', 'استلام الأوراق', 'استلام الاوراق', 'الأوراق', 'الاوراق', 'docs'], required: true },
+        { key: 'docsDate', label: 'تاريخ الاستلام', aliases: ['تاريخ الاستلام', 'تاريخ استلام الأوراق', 'تاريخ استلام الاوراق'] },
+        { key: 'blNo', label: 'رقم البوليصة', aliases: ['رقم البوليصة', 'البوليصة', 'رقم بوليصة الشحن', 'bl', 'blno'] },
         { key: 'note', label: 'ملاحظة', aliases: ['ملاحظة', 'ملاحظات', 'note'] }
       ]
     },
@@ -449,6 +461,24 @@
 
   // استيراد شيت محاسب الموردين (سطر لكل أمر): الشحن، المخلّص، الحالة، المدفوع، الملاحظة.
   // دفعات «من الشيت» تُستبدل في كل استيراد، والدفعات اليدوية تبقى كما هي.
+  // نعم/لا لاستلام الأوراق — الخانة الفاضية ما تغيّر شي
+  const docsVal = v => { const t = String(v == null ? '' : v).trim(); if (!t) return null; if (/^(نعم|ايوه|أيوه|yes|y|1|✓|\*|تم|استلمنا)/i.test(t)) return true; if (/^(لا|no|n|0|✗|لم)/i.test(t)) return false; return null; };
+  function setDocs(o, yes, { date, user, note } = {}) {
+    if (yes) { if (o.docsManual === 'yes') return false; o.docsManual = 'yes'; o.docsAt = date || ''; o.docsBy = user || ''; if (note) o.docsNote = note; return true; }
+    if (!o.docsManual) return false; delete o.docsManual; delete o.docsAt; delete o.docsBy; return true;
+  }
+  function applyDocs(db, recs, { date, user } = {}) {
+    const po = ensurePo(db), day = date || new Date().toISOString().slice(0, 10);
+    const res = { rows: 0, yes: [], no: [], unchanged: 0, notFound: [], blank: 0 };
+    for (const r of recs) {
+      if (!r.poNo) continue; res.rows++;
+      const o = po.orders[r.poNo]; if (!o) { res.notFound.push(r.poNo); continue; }
+      const v = docsVal(r.docs); if (v == null) { res.blank++; continue; }
+      if (r.blNo && String(r.blNo).trim() && !o.blNo) o.blNo = String(r.blNo).trim();
+      if (setDocs(o, v, { date: toDate(r.docsDate) || day, user, note: r.note ? String(r.note).trim() : '' })) (v ? res.yes : res.no).push(o.no); else res.unchanged++;
+    }
+    return res;
+  }
   function applyPOPay(db, recs, { date, user, file, currencyHint } = {}) {
     const po = ensurePo(db);
     const day = date || new Date().toISOString().slice(0, 10);
@@ -477,6 +507,7 @@
       if (has(r, 'blNo')) o.blNo = String(r.blNo).trim();
       const pdt = toDate(r.poDate); if (pdt) o.poDate = pdt;
       const sd = toDate(r.shipDate); if (sd) o.shipDate = sd;
+      { const dv = docsVal(r.docs); if (dv != null) setDocs(o, dv, { date: day, user }); }
       o.payments = (o.payments || []).filter(p => p.source !== 'sheet');
       const st = String(r.status || '').trim();
       const notPaid = /لم|غير|not|unpaid/i.test(st);
@@ -834,7 +865,7 @@
     if (/يورو|eur/i.test(t)) return 'EUR';
     return '';
   }
-  const Importers = { FLAG_COLS, parseClearerPdf, defaultClearerForm, isClearerReport, parseClearerReport, DEFAULT_CLEARER_MAP, applyTrack, mapTrackStatus, currencyFromHeader, KINDS, applyPOs, applyPOPay, toDate, curCode, detectHeader, rowsToRecords, applyItems, applySales, applyStock, applyTransit, autoAddItems, importLegacy, isLegacyWorkbook, syncGroups, parseActive };
+  const Importers = { applyDocs, docsVal, FLAG_COLS, parseClearerPdf, defaultClearerForm, isClearerReport, parseClearerReport, DEFAULT_CLEARER_MAP, applyTrack, mapTrackStatus, currencyFromHeader, KINDS, applyPOs, applyPOPay, toDate, curCode, detectHeader, rowsToRecords, applyItems, applySales, applyStock, applyTransit, autoAddItems, importLegacy, isLegacyWorkbook, syncGroups, parseActive };
   if (typeof module !== 'undefined' && module.exports) module.exports = Importers;
   else root.Importers = Importers;
 })(typeof window !== 'undefined' ? window : globalThis);

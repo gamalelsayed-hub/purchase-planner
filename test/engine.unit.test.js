@@ -349,4 +349,22 @@ assert.strictEqual(db.po.orders.K1.track.stage, 'emptyReturned'); assert.ok(db.p
   o.status = 'received'; assert.strictEqual(st(), 'وصل المستودع');
 }
 
+// شيت استلام الأوراق: نعم ← استلمنا، لا ← إلغاء، فاضي ← بدون تغيير
+{
+  const d7 = E.emptyDb(); d7.shipStages = E.defaultShipStages();
+  for (const no of ['A1', 'A2', 'A3']) d7.po.orders[no] = { no, status: 'open', currency: 'USD', lines: [], payments: [], shipping: 100, firstSeen: '2026-09-01' };
+  d7.po.orders.A3.docsManual = 'yes';
+  const hdr = ['رقم الأمر', 'CO', 'رسوم الشحن', 'رقم البوليصة', 'استلمنا الأوراق', 'تاريخ الاستلام'];
+  const rows = [hdr, ['A1', 'x', 100, 'BL1', 'نعم', '2026-11-15'], ['A2', 'x', 100, '', '', ''], ['A3', 'x', 100, '', 'لا', ''], ['ZZ', '', '', '', 'نعم', '']];
+  const dh = I.detectHeader(rows, 'docs');
+  const r = I.applyDocs(d7, I.rowsToRecords(rows, dh.row, dh.map, 'poNo'), { date: '2026-11-19', user: 'm' });
+  assert.deepStrictEqual(r.yes, ['A1']); assert.deepStrictEqual(r.no, ['A3']); assert.deepStrictEqual(r.notFound, ['ZZ']); assert.strictEqual(r.blank, 1);
+  const ms = no => E.poSummary(d7, '2026-11-19').find(x => x.no === no).mainStatus;
+  assert.strictEqual(ms('A1'), 'مشحون — استلمنا الأوراق'); assert.strictEqual(d7.po.orders.A1.docsAt, '2026-11-15'); assert.strictEqual(d7.po.orders.A1.blNo, 'BL1');
+  assert.strictEqual(ms('A2'), 'مشحون — بدون أوراق'); assert.strictEqual(ms('A3'), 'مشحون — بدون أوراق');
+  // نفس العمود في شيت الشحن والسداد
+  I.applyPOPay(d7, [{ poNo: 'A2', docs: 'نعم' }], { date: '2026-11-19' });
+  assert.strictEqual(ms('A2'), 'مشحون — استلمنا الأوراق');
+}
+
 console.log('✓ all engine unit tests passed');
