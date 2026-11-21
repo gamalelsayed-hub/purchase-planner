@@ -572,7 +572,16 @@
     };
   }
   // الوصول المتوقع: الخارجي من الخطة التراكمية، والمحلي من تاريخ الأمر + فترة التوصيل
+  // الوصول المتوقع (عليه يتحسب الكاش): وصول المنفذ من شيت المخلّص، أو تاريخ الشحن الفعلي (من البوليصة — المحاسب) + مدة الشحن — أيهما أقرب.
+  // ما فيه شحن فعلي ← تاريخ تعميد الشحن + مدة الشحن. ما فيه ولا واحد ← الخطة من تاريخ الأمر.
+  function arrivalEta(db, o) {
+    const T = num((db.settings || {}).shipTransitDays) || 30, t = o.track || {};
+    const c = [t.portAt, t.portEta, o.shipDate ? addDaysDate(o.shipDate, T) : ''].filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d || ''));
+    if (!c.length && o.shipAwardDate) c.push(addDaysDate(o.shipAwardDate, T));
+    return c.length ? c.sort()[0] : '';
+  }
   function poAutoEta(db, o, todayIso) {
+    const a = arrivalEta(db, o); if (a) return a;
     if ((db.shipStages || []).length && isForeign(db, o)) { const p = poPlan(db, o, todayIso); if (p.eta) return p.eta; }
     return addMonthsDate(o.poDate || o.firstSeen, poLead(db, o));
   }
@@ -614,7 +623,7 @@
       const dueSar = o.payClosed ? 0 : Math.max(0, totalSar - paidSar); // «اقفال» في سند الصرف = الأمر مسدد
       const foreign = (db.shipStages || []).length > 0 && isForeign(db, o);
       const plan = foreign ? poPlan(db, o, today) : null;
-      const autoEta = plan && plan.eta ? plan.eta : addMonthsDate(o.poDate || o.firstSeen, poLead(db, o));
+      const autoEta = arrivalEta(db, o) || (plan && plan.eta ? plan.eta : addMonthsDate(o.poDate || o.firstSeen, poLead(db, o)));
       const eta = o.etaManual && o.eta ? o.eta : autoEta;
       const expShip = plan && o.status === 'open' && !isShipped(o) && !docsOf(o) ? plan.shipPlanned : '';
       const shipLateDays = expShip ? dayDiff(today, expShip) : 0;
@@ -623,7 +632,7 @@
       const docs = docsOf(o);
       return {
         no, status: o.status, stage: stageOf(o), stageLabel: STAGE_LABEL[stageOf(o)], mainStatus: mainStatusOf(o, docs), pending: !!o.pendingApproval, docs, shippedManual: o.shippedManual === true, foreign,
-        blNo: o.blNo || '', shipDate: o.shipDate || o.shippedAt || '', attachments: (o.attachments || []).length, currency: o.currency || 'SAR', rate, value, shipping, extras, extrasSar, total, totalSar, paidSar, dueSar, payStatus,
+        blNo: o.blNo || '', shipDate: o.shipDate || '', shipAwardDate: o.shipAwardDate || '', attachments: (o.attachments || []).length, currency: o.currency || 'SAR', rate, value, shipping, extras, extrasSar, total, totalSar, paidSar, dueSar, payStatus,
         remainingValue, lines: (o.lines || []).length, eta, etaManual: !!o.etaManual, daysToEta, planEta: plan ? plan.planEta : '', variance: plan && !o.etaManual ? plan.variance : (plan && plan.planEta && eta ? dayDiff(eta, plan.planEta) : null),
         agent: o.agent || '', supplier: o.supplier || '',
         firstSeen: o.firstSeen || '', lastSeen: o.lastSeen || '', receivedAt: o.receivedAt || '', receivedBy: o.receivedBy || '', note: o.note || '', poDate: o.poDate || '',

@@ -1412,7 +1412,7 @@
     { k: 'containers', h: 'الحاويات', def: true, v: o => o.containers.map(c => c.no).join(' '), f: o => o.containers.length ? `${fmt(o.containers.length)} <span class="small">(${fmt(o.containersOpen)} لم تُسلّم)</span>` : '' },
     { k: 'demurrageLeft', h: 'أيام السماح', def: true, n: true, f: o => demCell(o) },
     { k: 'expShip', h: 'الشحن المخطط', f: o => o.expShip ? `${esc(o.expShip)}${o.shipLate ? ` <span class="pill bad">تأخر ${o.shipLateDays} يوم</span>` : ''}` : '' },
-    { k: 'shipDate', h: 'تاريخ الشحن' }, { k: 'portEta', h: 'وصول المنفذ (المخلّص)' },
+    { k: 'shipAwardDate', h: 'تاريخ تعميد الشحن', def: true }, { k: 'shipDate', h: 'تاريخ الشحن الفعلي', def: true }, { k: 'portEta', h: 'وصول المنفذ (المخلّص)' },
     { k: 'eta', h: 'الوصول المتوقع', def: true, f: etaCell }, { k: 'planEta', h: 'الوصول المخطط' },
     { k: 'variance', h: 'الفرق عن الخطة (يوم)', def: true, n: true, f: o => o.variance == null ? '' : o.variance > 0 ? `<b style="color:var(--bad)">+${fmt(o.variance)}</b>` : o.variance < 0 ? `<span style="color:var(--ok)">${fmt(o.variance)}</span>` : '0' },
     { k: 'currency', h: 'العملة', def: true, v: o => curName(o.currency) },
@@ -1492,7 +1492,7 @@
     const over = open.filter(o => o.daysToEta != null && o.daysToEta < 0);
     const byCur = new Map(); for (const o of inH) byCur.set(o.currency, (byCur.get(o.currency) || 0) + o.dueSar / o.rate);
     const byParty = key => [...inH.reduce((mm, o) => { const k = o[key] || '—'; const g = mm.get(k) || { key: k, count: 0, dueSar: 0 }; g.count++; g.dueSar += o.dueSar; mm.set(k, g); return mm; }, new Map()).values()];
-    return `<div class="toolbar"><label class="chk">خلال <select class="inp" data-chg="filter" data-f="cash.horizon">${[30, 60, 90, 120, 180, 365].map(d => `<option value="${d}" ${d === H ? 'selected' : ''}>${d} يوم</option>`).join('')}</select></label><span class="small">من اليوم ${esc(t)} — الأوامر المفتوحة (المعتمدة) غير المسددة بالكامل، حسب الوصول المتوقع، وبنفس الفلاتر فوق</span></div>
+    return `<div class="toolbar"><label class="chk">خلال <select class="inp" data-chg="filter" data-f="cash.horizon">${[30, 60, 90, 120, 180, 365].map(d => `<option value="${d}" ${d === H ? 'selected' : ''}>${d} يوم</option>`).join('')}</select></label><span class="small">من اليوم ${esc(t)} — الأوامر المفتوحة (المعتمدة) غير المسددة بالكامل، حسب <b>الوصول المتوقع</b> (وصول المنفذ من المخلّص أو الشحن الفعلي + ${fmt(num(db.settings.shipTransitDays) || 30)} يوم — أيهما أقرب)، وبنفس الفلاتر فوق</span></div>
       <div class="kpis" style="grid-template-columns:repeat(5,minmax(0,1fr))">
         <div class="kpi"><div class="l">مطلوب خلال ${H} يوم (شامل المتأخر)</div><div class="v">${money(sum(inH))}</div><div class="s">${cur()} — ${fmt(inH.length)} أمر${[...byCur].map(([c, v]) => c !== db.currencies[0].code ? ` — ${money(v)} ${esc(curName(c))}` : '').join('')}</div></div>
         ${MS.map(s => { const a = inH.filter(o => o.mainStatus === s); return `<div class="kpi"><div class="l">منها ${esc(s)}</div><div class="v">${money(sum(a))}</div><div class="s">${fmt(a.length)} أمر</div></div>`; }).join('')}
@@ -1727,12 +1727,13 @@
         <label class="f">العملة<select id="o_cur" ${dis(canPay)}>${db.currencies.map(c => `<option value="${esc(c.code)}" ${o.currency === c.code ? 'selected' : ''}>${esc(c.name)} (${c.rate})</option>`).join('')}</select></label>
         <label class="f">سعر صرف خاص (فارغ = من الإعدادات)<input id="o_rate" type="number" step="any" value="${o.rate || ''}" ${dis(canPay)}></label>
         <label class="f">رسوم الشحن (بعملة الأمر)<input id="o_ship" type="number" step="any" value="${o.shipping || ''}" ${dis(canPay)}></label>
+        <label class="f">تاريخ تعميد الشحن (من أونكس)<input id="o_award" type="date" value="${esc(o.shipAwardDate || '')}" ${dis(canSt || canPay)}></label>
         ${(o.lines || []).length ? '' : `<label class="f">قيمة الأمر (بدون أصناف)<input id="o_val" type="number" step="any" value="${o.manualValue || ''}" ${dis(canPay)}></label>`}
         <label class="f">تاريخ الأمر<input id="o_pd" type="date" value="${esc(o.poDate || '')}" ${dis(canSt || canPay)}></label>
         <label class="f">مشحون (يدوي) — للشحن على المورد أو رسوم ما انسجلت<select id="o_shipm" ${dis(canSt || canPay)}><option value="" ${o.shippedManual ? '' : 'selected'}>لا (حسب رسوم الشحن)</option><option value="yes" ${o.shippedManual ? 'selected' : ''}>نعم — مشحون</option></select></label>
         <label class="f">الأوراق (يعلّمها المحاسب)<select id="o_docs" ${dis(canSt || canPay)}><option value="" ${o.docsManual === 'yes' ? '' : 'selected'}>ما استلمنا الأوراق</option><option value="yes" ${o.docsManual === 'yes' ? 'selected' : ''}>استلمنا الأوراق</option></select></label>
         <label class="f">رقم بوليصة الشحن<input id="o_bl" value="${esc(o.blNo || '')}" ${dis(canSt)}></label>
-        <label class="f">تاريخ الشحن<input id="o_sd" type="date" value="${esc(o.shipDate || '')}" ${dis(canSt)}></label>
+        <label class="f">تاريخ الشحن الفعلي (من البوليصة — المحاسب)<input id="o_sd" type="date" value="${esc(o.shipDate || '')}" ${dis(canSt || canPay)}></label>
         <label class="f">الوصول المتوقع — فارغ = تلقائي (${esc(auto || '—')})<input id="o_eta" type="date" value="${esc(o.etaManual ? o.eta : '')}" ${dis(canSt)}></label>
         <label class="f full">ملاحظة<input id="o_note" value="${esc(o.note || '')}" ${dis(canPay || canSt)}></label>
       </div>
@@ -1785,11 +1786,12 @@
           }
           if (canSt) {
             const e = m.q('#o_eta').value; o.eta = e; o.etaManual = !!e;
-            o.blNo = m.q('#o_bl').value.trim(); o.shipDate = m.q('#o_sd').value;
+            o.blNo = m.q('#o_bl').value.trim();
             if ((o.blNo || o.shipDate) && !o.shipped && o.status === 'open') { o.shipped = true; o.shippedAt = o.shipDate || today(); o.shippedBy = 'manual'; }
           }
           if (canPay || canSt) {
             o.note = m.q('#o_note').value.trim(); o.poDate = m.q('#o_pd').value;
+            o.shipDate = m.q('#o_sd').value; o.shipAwardDate = m.q('#o_award').value;
             const sm2 = m.q('#o_shipm').value === 'yes'; if (!!o.shippedManual !== sm2) { if (sm2) o.shippedManual = true; else delete o.shippedManual; log(`أمر الشراء ${no}: ${sm2 ? 'مشحون (يدوي)' : 'إلغاء مشحون يدوي'}`); }
             const dm = m.q('#o_docs').value; if ((o.docsManual === 'yes' ? 'yes' : '') !== dm) { if (dm) o.docsManual = 'yes'; else delete o.docsManual; log(`أمر الشراء ${no}: ${dm ? 'استلمنا الأوراق' : 'ما استلمنا الأوراق'}`); }
           }
@@ -2072,7 +2074,8 @@
           <label class="f">الحالة الرئيسية<select id="b_status">${keep}<option value="issued">صادر</option><option value="shipNoDocs">مشحون — بدون أوراق</option><option value="shipDocs">مشحون — استلمنا الأوراق</option><option value="received">وصل المستودع</option><option value="open">إعادة فتح (لم يصل)</option></select></label>
           <label class="f">مشحون (يدوي)<select id="b_shipm">${keep}<option value="yes">نعم — مشحون</option><option value="no">لا (حسب رسوم الشحن)</option></select></label>
           <label class="f">الأوراق<select id="b_docs">${keep}<option value="yes">استلمنا الأوراق</option><option value="no">ما استلمنا الأوراق</option></select></label>
-          <label class="f">تاريخ الشحن<input id="b_shipdate" type="date"></label>
+          <label class="f">تاريخ الشحن الفعلي (البوليصة)<input id="b_shipdate" type="date"></label>
+          <label class="f">تاريخ تعميد الشحن<input id="b_award" type="date"></label>
           <label class="f">الوصول المتوقع<input id="b_eta" type="date"></label>
           <label class="chk" style="margin-top:22px"><input type="checkbox" id="b_etaauto"> إرجاع الوصول المتوقع للتلقائي</label>
         </div>`)}
@@ -2125,6 +2128,7 @@
               else if (status === 'received' && o.status === 'open') { o.status = 'received'; o.receivedAt = today(); o.receivedBy = 'manual'; o.receivedNote = 'تعديل جماعي — ' + ui.user.name; ch = true; }
               else if (status === 'open' && o.status === 'received') { o.status = 'open'; o.receivedAt = ''; o.receivedBy = ''; ch = true; }
               if (sd && status !== 'shipped') { o.shipDate = sd; ch = true; }
+              const aw = v('#b_award'); if (aw) { o.shipAwardDate = aw; ch = true; }
               if (eta) { o.eta = eta; o.etaManual = true; ch = true; } else if (v('#b_etaauto')) { o.eta = ''; o.etaManual = false; ch = true; }
             }
             if (cP) {
@@ -2221,6 +2225,7 @@
       ${db.currencies.map((c, i) => `<tr><td><input class="inp" style="width:80px" data-chg="cur" data-i="${i}" data-k="code" value="${esc(c.code)}"></td><td><input class="inp" style="width:120px" data-chg="cur" data-i="${i}" data-k="name" value="${esc(c.name)}"></td><td><input class="inp" style="width:100px" type="number" step="any" min="0" data-chg="cur" data-i="${i}" data-k="rate" value="${c.rate}"></td><td>${i ? `<button class="sm danger" data-act="delCur" data-i="${i}">حذف</button>` : '<span class="small">الأساسية</span>'}</td></tr>`).join('')}
       </tbody></table><button class="sm" data-act="addCur" style="margin-top:8px">+ إضافة عملة</button>
       <div class="form f4" style="margin-top:12px"><label class="f">أفق الكاش المطلوب (يوم)<input class="inp" type="number" step="1" min="1" data-chg="set" data-k="cashHorizonDays" value="${esc(s.cashHorizonDays)}"></label>
+        <label class="f">مدة الشحن حتى الوصول (يوم) — الوصول المتوقع = الشحن الفعلي + هذي المدة<input class="inp" type="number" step="1" min="1" data-chg="set" data-k="shipTransitDays" value="${esc(s.shipTransitDays || 30)}"></label>
         <label class="f">نوع أوامر الشراء<select class="inp" data-chg="setBool" data-k="allPoForeign"><option value="1" ${s.allPoForeign !== false ? 'selected' : ''}>كلها استيراد خارجي (بالدولار ومراحل الشحن)</option><option value="0" ${s.allPoForeign === false ? 'selected' : ''}>فيها محلي (حسب نوع الصنف وCO)</option></select></label>
         <label class="f" style="grid-column:span 2">خصم أوامر الشراء المفتوحة من الطلب كبضاعة بالطريق<select class="inp" data-chg="setBool" data-k="poAsTransit"><option value="0" ${!s.poAsTransit ? 'selected' : ''}>مقفل — أوامر الشراء للمتابعة والكاش فقط، والطلب يعتمد على البضاعة بالطريق اليدوية</option><option value="1" ${s.poAsTransit ? 'selected' : ''}>مفعّل — الكمية المتبقية في الأوامر المفتوحة تنخصم من الطلب تلقائيًا</option></select></label></div>
     </div>
@@ -2381,7 +2386,7 @@
             if (!recs0.length) return toast('لا توجد أسطر صالحة', 'bad');
             await saveNow(); await api.snapshot('before-import-docs');
             const r = I.applyDocs(db, recs0, { date: today(), user: ui.user.name });
-            const msg = `استلام الأوراق: ${fmt(r.yes.length)} أمر صار «استلمنا الأوراق»${r.no.length ? ` — ${fmt(r.no.length)} انلغى` : ''}${r.shipYes.length ? ` — مشحون يدوي ${fmt(r.shipYes.length)}` : ''}${r.shipNo.length ? ` — إلغاء مشحون يدوي ${fmt(r.shipNo.length)}` : ''} — بدون تغيير ${fmt(r.rows - r.notFound.length - new Set(r.yes.concat(r.no, r.shipYes, r.shipNo)).size)}`;
+            const msg = `استلام الأوراق: ${fmt(r.yes.length)} أمر صار «استلمنا الأوراق»${r.no.length ? ` — ${fmt(r.no.length)} انلغى` : ''}${r.shipYes.length ? ` — مشحون يدوي ${fmt(r.shipYes.length)}` : ''}${(r.shipDates || []).length ? ` — تاريخ شحن فعلي ${fmt(r.shipDates.length)}` : ''}${r.shipNo.length ? ` — إلغاء مشحون يدوي ${fmt(r.shipNo.length)}` : ''} — بدون تغيير ${fmt(r.rows - r.notFound.length - new Set(r.yes.concat(r.no, r.shipYes, r.shipNo, r.shipDates || [])).size)}`;
             log(msg); m.close(); ui.page = 'po'; ui.poTab = 'orders'; commit(); await saveNow();
             modal({ title: 'نتيجة استيراد استلام الأوراق', size: 'narrow', body: `<div class="banner ok">${esc(msg)}</div>${r.yes.length ? `<p class="small">استلمنا: ${r.yes.map(esc).join('، ')}</p>` : ''}${r.no.length ? `<p class="small">انلغى: ${r.no.map(esc).join('، ')}</p>` : ''}${r.notFound.length ? `<div class="banner warn">أوامر مو عندنا: ${r.notFound.map(esc).join('، ')}</div>` : ''}`, foot: '<button class="primary" data-close>تم</button>' });
             return;
@@ -2614,12 +2619,12 @@
   function docsTemplateSpec() {
     const rows = masterAll().filter(o => o.status === 'open' && !o.pending)
       .sort((a, b) => (a.docs - b.docs) || String(a.no).localeCompare(String(b.no)))
-      .map(o => { const po = db.po.orders[o.no]; return { poNo: o.no, co: o.forwarder, supplier: o.supplier, shipping: o.shipping, blNo: o.blNo, shippedManual: o.shippedManual ? 'نعم' : '', docs: o.docs ? 'نعم' : '', docsDate: po.docsAt || '', note: po.docsNote || '' }; });
+      .map(o => { const po = db.po.orders[o.no]; return { poNo: o.no, co: o.forwarder, supplier: o.supplier, shipping: o.shipping, blNo: o.blNo, shippedManual: o.shippedManual ? 'نعم' : '', shipDate: po.shipDate || '', docs: o.docs ? 'نعم' : '', docsDate: po.docsAt || '', note: po.docsNote || '' }; });
     const yn = "'القوائم'!$A$2:$A$3";
     return { sheets: [
       { name: 'استلام الأوراق', title: 'استلام أوراق الشحن (البوليصة/التلكس)' + (db.settings.companyName ? ' — ' + db.settings.companyName : ''), subtitle: 'كل الأوامر المفتوحة. «استلمنا الأوراق» = نعم للي استلمنا أوراقه. «مشحون (يدوي)» = نعم للي انشحن وما له رسوم شحن في أونكس (الشحن على المورد). «لا» تلغي، والفاضي ما يغيّر شي.', columns: [
         { header: 'رقم الأمر', key: 'poNo', width: 12 }, { header: 'CO', key: 'co', width: 22 }, { header: 'المورد', key: 'supplier', width: 18 }, { header: 'رسوم الشحن', key: 'shipping', width: 12, fmt: '#,##0.00' },
-        { header: 'رقم البوليصة', key: 'blNo', width: 18, input: true }, { header: 'مشحون (يدوي)', key: 'shippedManual', width: 13, input: true, listRef: yn, listStrict: true }, { header: 'استلمنا الأوراق', key: 'docs', width: 14, input: true, listRef: yn, listStrict: true },
+        { header: 'رقم البوليصة', key: 'blNo', width: 18, input: true }, { header: 'مشحون (يدوي)', key: 'shippedManual', width: 13, input: true, listRef: yn, listStrict: true }, { header: 'تاريخ الشحن الفعلي (البوليصة)', key: 'shipDate', width: 16, input: true, fmt: 'yyyy-mm-dd' }, { header: 'استلمنا الأوراق', key: 'docs', width: 14, input: true, listRef: yn, listStrict: true },
         { header: 'تاريخ الاستلام', key: 'docsDate', width: 14, input: true, fmt: 'yyyy-mm-dd' }, { header: 'ملاحظة', key: 'note', width: 30, input: true }
       ], rows },
       { name: 'القوائم', columns: [{ header: 'استلمنا الأوراق', key: 'v', width: 16 }], rows: [{ v: 'نعم' }, { v: 'لا' }] }

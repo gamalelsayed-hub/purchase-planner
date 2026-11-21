@@ -160,7 +160,7 @@ assert.strictEqual(db.po.orders.P1.payments.length, 1);
 assert.strictEqual(E.stageOf(db.po.orders.P1), E.num(db.po.orders.P1.shipping) > 0 ? 'shipped' : 'issued'); assert.strictEqual(E.stageOf(db.po.orders.P2), 'issued');
 I.applyPOPay(db, [{ poNo: 'P2', status: 'لم يتم السداد', shipDate: '2026-08-01', blNo: 'BL-77' }], { date: '2026-08-02' });
 const p2 = E.poSummary(db, '2026-08-02').find(o => o.no === 'P2');
-assert.strictEqual(p2.stage, 'issued', 'no shipping amount → still issued'); assert.strictEqual(p2.blNo, 'BL-77'); assert.strictEqual(p2.eta, '2026-08-01', 'local order: PO date + lead time (no shipping stages)');
+assert.strictEqual(p2.stage, 'issued', 'no shipping amount → still issued'); assert.strictEqual(p2.blNo, 'BL-77'); assert.strictEqual(p2.eta, '2026-08-31', 'arrival = actual ship date (accountant) + transit 30');
 // تاريخ الأمر من الشيت: الأمر الصادر يحسب وصوله من تاريخ الأمر + فترة التوصيل
 db.po.orders.P2.shipped = false; db.po.orders.P2.shipDate = ''; db.po.orders.P2.shippedAt = '';
 I.applyPOPay(db, [{ poNo: 'P2', poDate: '2026-05-01' }], { date: '2026-08-03' });
@@ -416,6 +416,25 @@ assert.strictEqual(db.po.orders.K1.track.stage, 'emptyReturned'); assert.ok(db.p
   assert.ok(!d10.po.orders['61001'].payments.some(p => p.source === 'sheet'), 'sheet payments replaced by vouchers');
   assert.strictEqual(s('61002').payStatus, 'غير مسدد'); assert.strictEqual(d10.po.orders['61002'].extraCosts.length, 1);
   const r2 = I.applyVouchers(d10, L, {}); assert.strictEqual(r2.added, 0); assert.strictEqual(r2.dup, 4);
+}
+
+// الوصول المتوقع للكاش: وصول المنفذ (المخلّص) أو الشحن الفعلي + 30 — أيهما أقرب؛ وإلا التعميد + 30
+{
+  const d11 = E.emptyDb(); d11.shipStages = E.defaultShipStages();
+  const o = d11.po.orders.A = { no: 'A', status: 'open', currency: 'USD', lines: [], payments: [], firstSeen: '2026-06-01', poDate: '2026-06-01', manualValue: 1000 };
+  const eta = () => E.poSummary(d11, '2026-11-21').find(x => x.no === 'A').eta;
+  const planEta = eta();
+  o.shipAwardDate = '2026-11-01'; assert.strictEqual(eta(), '2026-12-01', 'award + 30');
+  o.shipDate = '2026-11-10'; assert.strictEqual(eta(), '2026-12-10', 'actual ship + 30 wins over award');
+  o.track = { portEta: '2026-12-05' }; assert.strictEqual(eta(), '2026-12-05', 'clearer port ETA earlier → wins');
+  o.track.portEta = '2026-12-20'; assert.strictEqual(eta(), '2026-12-10', 'ship + 30 earlier → wins');
+  o.eta = '2027-01-01'; o.etaManual = true; assert.strictEqual(eta(), '2027-01-01', 'manual wins');
+  assert.ok(planEta && planEta !== '2026-12-01');
+  // التعميد من تقرير أونكس
+  const hdr = ['تاريخ تعميد الشحن', 'رسوم الشحن', 'الكمية المتبقية', 'كمية الفاتورة', 'سعر امر الشراء', 'كمية امر الشراء', 'الوحدة', 'رقم الصنف', 'رقم الأمر', 'تاريخ امر الشراء'];
+  const rows = [hdr, ['03/11/2026', 500, 5, 0, 100, 5, 'حبه', 'C1', 'B1', '01/08/2026']];
+  const dh = I.detectHeader(rows, 'po'); I.applyPOs(d11, I.rowsToRecords(rows, dh.row, dh.map, 'poNo'), { date: '2026-11-21' });
+  assert.strictEqual(d11.po.orders.B1.shipAwardDate, '2026-11-03');
 }
 
 console.log('✓ all engine unit tests passed');

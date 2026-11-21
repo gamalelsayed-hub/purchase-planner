@@ -75,6 +75,7 @@
         { key: 'currency', label: 'العملة', aliases: ['العملة', 'currency'] },
         { key: 'poDate', label: 'تاريخ الأمر', aliases: ['تاريخ الأمر', 'تاريخ الامر', 'تاريخ امر الشراء', 'تاريخ أمر الشراء', 'تاريخ امر الشر', 'تاريخ امر', 'التاريخ', 'date'] },
         { key: 'eta', label: 'تاريخ الوصول المتوقع', aliases: ['تاريخ الوصول المتوقع', 'تاريخ الوصول', 'الوصول المتوقع', 'eta'] },
+        { key: 'shipAwardDate', label: 'تاريخ تعميد الشحن', aliases: ['تاريخ تعميد الشحن', 'تعميد الشحن', 'تاريخ التعميد', 'تاريخ الشحن'] },
         { key: 'warehouse', label: 'المخزن', aliases: ['المخزن', 'المستودع', 'رقم المخزن', 'warehouse'] },
         { key: 'costCenter', label: 'مركز التكلفة', aliases: ['مركز التكلفة', 'مركز التكلفه', 'cost center', 'costcenter'] },
         { key: 'shipping', label: 'رسوم الشحن', aliases: ['رسوم الشحن', 'تكلفة الشحن', 'الشحن', 'shipping', 'freight'] },
@@ -108,6 +109,7 @@
         { key: 'poNo', label: 'رقم الأمر', aliases: ['رقم الأمر', 'رقم الامر', 'رقم امر الشراء', 'رقم معاملة العميل', 'امر الشراء', 'po'], required: true },
         { key: 'docs', label: 'استلمنا الأوراق', aliases: ['استلمنا الأوراق', 'استلمنا الاوراق', 'استلام الأوراق', 'استلام الاوراق', 'الأوراق', 'الاوراق', 'docs'] },
         { key: 'shippedManual', label: 'مشحون (يدوي)', aliases: ['مشحون (يدوي)', 'مشحون يدوي', 'تم الشحن', 'مشحون'] },
+        { key: 'shipDate', label: 'تاريخ الشحن الفعلي (البوليصة)', aliases: ['تاريخ الشحن الفعلي (البوليصة)', 'تاريخ الشحن الفعلي', 'تاريخ البوليصة', 'تاريخ الشحن'] },
         { key: 'docsDate', label: 'تاريخ الاستلام', aliases: ['تاريخ الاستلام', 'تاريخ استلام الأوراق', 'تاريخ استلام الاوراق'] },
         { key: 'blNo', label: 'رقم البوليصة', aliases: ['رقم البوليصة', 'البوليصة', 'رقم بوليصة الشحن', 'bl', 'blno'] },
         { key: 'note', label: 'ملاحظة', aliases: ['ملاحظة', 'ملاحظات', 'note'] }
@@ -442,6 +444,7 @@
       }
       const ships = lines.map(l => l._r._ship).filter(v => v != null && v > 0);
       if (ships.length) { const uniq = [...new Set(ships)]; o.shipping = uniq.length === 1 ? uniq[0] : uniq.reduce((a, v) => a + v, 0); }
+      const aw = lines.map(l => toDate(l._r.shipAwardDate)).filter(Boolean).sort().pop(); if (aw) o.shipAwardDate = aw; // الفاضي ما يمسح
       const cl = mostCommon(lines.map(l => String(l._r.clearer || '').trim()));
       if (cl) { o.agent = cl; o.track = o.track || { history: [], containers: [] }; o.track.clearer = ensureParty(db, 'clearer', cl); }
       o.flags = (o.flags || []).filter(f => f !== 'stillInReport');
@@ -480,8 +483,9 @@
       const sv = docsVal(r.shippedManual);
       if (sv === true && o.shippedManual !== true) { o.shippedManual = true; res.shipYes.push(o.no); }
       else if (sv === false && o.shippedManual) { delete o.shippedManual; res.shipNo.push(o.no); }
-      const v = docsVal(r.docs); if (v == null) { res.blank++; continue; }
       if (r.blNo && String(r.blNo).trim() && !o.blNo) o.blNo = String(r.blNo).trim();
+      { const sd = toDate(r.shipDate); if (sd && sd !== o.shipDate) { o.shipDate = sd; (res.shipDates = res.shipDates || []).push(o.no); } }
+      const v = docsVal(r.docs); if (v == null) { res.blank++; continue; }
       if (setDocs(o, v, { date: toDate(r.docsDate) || day, user, note: r.note ? String(r.note).trim() : '' })) (v ? res.yes : res.no).push(o.no); else res.unchanged++;
     }
     return res;
