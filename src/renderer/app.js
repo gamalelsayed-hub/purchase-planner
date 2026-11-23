@@ -395,6 +395,7 @@
     }
     const info = document.getElementById('appInfo');
     if (info && ui.cfg) info.textContent = `النسخ الاحتياطية على هذا الجهاز: ${ui.cfg.backupDir}`;
+    document.querySelectorAll('#main [data-indet]').forEach(x => { x.indeterminate = true; });
     const sc2 = $('#main .tbl-wrap');
     if (sc2 && ui.keepScroll) sc2.scrollTop = scrollTop;
     ui.keepScroll = false;
@@ -1375,7 +1376,7 @@
   const ALERTS = ['متأخر في مرحلته', 'متأخر عن الخطة', 'تأخر الشحن', 'مطلوب تلكس', 'غرامة حاويات', 'قربت أيام السماح', 'بدون تاريخ أمر', 'لا يزال في التقرير'];
   // مراحل المخلّص للاستعراض فقط — مخفية إلا إذا ضغطت «إظهار مراحل المخلّص» (ينحفظ على الجهاز)
   const showStages = () => { try { return localStorage.getItem('pp_show_stages') === '1'; } catch (e) { return false; } };
-  const mfGroups = () => MF_GROUPS.filter(([g]) => g !== 'stage' || showStages());
+  const mfGroups = () => MF_GROUPS;
   const MF_GROUPS = [['main', 'الحالة'], ['stage', 'مراحل المخلّص'], ['fw', 'CO'], ['cl', 'المخلّص'], ['sup', 'المورد'], ['wh', 'المخزن'], ['pay', 'السداد'], ['cur', 'العملة'], ['shipc', 'قيمة الشحن'], ['pod', 'تاريخ الأمر'], ['bl', 'رقم البوليصة'], ['alert', 'تنبيهات']];
   const mfState = () => { const f = ui.f.m || (ui.f.m = { main: ['بانتظار الاعتماد', 'صادر', 'مشحون — بدون أوراق', 'مشحون — استلمنا الأوراق'], stage: [], fw: [], cl: [], sup: [], pay: [], cur: [], alert: [], q: '' }); MF_GROUPS.forEach(([g]) => { if (!Array.isArray(f[g])) f[g] = []; }); return f; };
   // كل الأوامر بكل المعلومات (السداد + المتابعة + الخطة) في سطر واحد
@@ -1404,30 +1405,67 @@
   const whLabel = v => String(v || '').split('، ').filter(Boolean).map(whName).join('، ');
   const mfValue = (g, o) => g === 'main' ? [o.mainStatus] : g === 'stage' ? [o.stageName || '— محلي (بدون مراحل) —'] : g === 'fw' ? [o.forwarder || '— بدون —'] : g === 'cl' ? [o.clearer || '— بدون —'] :
     g === 'sup' ? [o.supplier || '— بدون —'] : g === 'cc' ? [o.costCenter || '— بدون —'] : g === 'wh' ? (o.warehouse ? o.warehouse.split('، ').map(whName) : ['— بدون —']) : g === 'pay' ? [o.payStatus] : g === 'cur' ? [curName(o.currency)] : g === 'shipc' ? [num(o.shipping) > 0 ? 'الشحن مسجّل' : 'الشحن فارغ'] : g === 'pod' ? [o.poDate ? 'تاريخ الأمر موجود' : 'تاريخ الأمر فارغ'] : g === 'bl' ? [String(o.blNo || '').trim() ? 'البوليصة موجودة' : 'البوليصة فارغة'] : g === 'alert' ? o.alerts : [];
+  // شجرة الحالة: الحالات الرئيسية، وتحت كل وحدة مراحل المخلّص اللي تخصها (قبل الشحن / من الشحن لين المستودع / بعد الوصول)
+  function stageGroups() {
+    const st = db.shipStages || [], i1 = st.findIndex(x => x.marks === 'shipped'), i2 = st.findIndex(x => x.marks === 'received');
+    const names = (a, b) => st.slice(a < 0 ? 0 : a, b < 0 ? st.length : b).map(x => x.name);
+    return { issued: names(0, i1), shipped: names(i1, i2), arrived: i2 < 0 ? [] : names(i2, st.length) };
+  }
+  const groupOfMain = m => /^مشحون/.test(m) ? 'shipped' : m === 'وصل المستودع' ? 'arrived' : 'issued';
+  const SHIPPED_ST = ['مشحون — بدون أوراق', 'مشحون — استلمنا الأوراق'];
+  function statusMatch(o, f) {
+    const M = f.main || [], S = f.stage || [];
+    if (!M.length && !S.length) return true;
+    if (M.length && !M.includes(o.mainStatus)) return false;
+    if (!S.length) return true;
+    const gs = stageGroups()[groupOfMain(o.mainStatus)], rel = S.filter(x => gs.includes(x));
+    if (rel.length) return rel.includes(o.stageName);
+    return M.length ? true : S.includes(o.stageName);
+  }
   function masterRows(except) {
+    const ex = [].concat(except || []);
     const f = mfState(), q = (f.q || '').trim().toLowerCase();
     return masterAll().filter(o => {
-      for (const [g] of mfGroups()) { if (g === except || !f[g].length) continue; const vs = mfValue(g, o); if (!vs.some(v => f[g].includes(v))) return false; }
+      if (!ex.includes('main') && !ex.includes('stage') && !statusMatch(o, f)) return false;
+      for (const [g] of mfGroups()) { if (g === 'main' || g === 'stage' || ex.includes(g) || !f[g].length) continue; const vs = mfValue(g, o); if (!vs.some(v => f[g].includes(v))) return false; }
       if (q && !(o.no.toLowerCase().includes(q) || o.blNo.toLowerCase().includes(q) || o.supplier.toLowerCase().includes(q) || o.forwarder.toLowerCase().includes(q) || o.clearer.toLowerCase().includes(q) || o.costCenter.toLowerCase().includes(q) || o.note.toLowerCase().includes(q) ||
         o.containers.some(c => c.no.toLowerCase().includes(q)) || (db.po.orders[o.no].lines || []).some(l => l.code.toLowerCase().includes(q) || String(l.name).toLowerCase().includes(q)))) return false;
       return true;
     });
   }
-  // لوحة الفلاتر: خانات تحديد (أكثر من قيمة)، والعدد جنب كل قيمة حسب باقي الفلاتر
+  // لوحة الفلاتر: أعمدة جنب بعض، تحت كل عمود قائمة (سطر لكل قيمة مع العدد)، وكل عمود ينطوي وينفتح
+  const fgOpen = g => { try { const v = JSON.parse(localStorage.getItem('pp_fg_open') || '{}'); return v[g] !== false; } catch (e) { return true; } };
+  const fgNodeOpen = k => { try { return !!JSON.parse(localStorage.getItem('pp_fg_nodes') || '{}')[k]; } catch (e) { return false; } };
   function filterPanel() {
     const f = mfState();
-    const active = mfGroups().filter(([g]) => f[g].length).length + (f.q ? 1 : 0);
-    const groups = mfGroups().map(([g, label]) => {
-      const base = masterRows(g);
-      const counts = new Map(); base.forEach(o => mfValue(g, o).forEach(v => counts.set(v, (counts.get(v) || 0) + 1)));
-      let vals = g === 'main' ? E.MAIN_STATUSES.slice() : g === 'alert' ? ALERTS.slice() : g === 'stage' ? (db.shipStages || []).map(s => s.name).concat(['— محلي (بدون مراحل) —']) : g === 'pay' ? ['غير مسدد', 'مسدد جزئيًا', 'مسدد', 'غير محدد'] : g === 'shipc' ? ['الشحن مسجّل', 'الشحن فارغ'] : g === 'pod' ? ['تاريخ الأمر موجود', 'تاريخ الأمر فارغ'] : g === 'bl' ? ['البوليصة موجودة', 'البوليصة فارغة'] : [...new Set(masterAll().flatMap(o => mfValue(g, o)))].sort();
+    const active = mfGroups().filter(([g]) => f[g].length).length + (f.q ? 1 : 0) - (f.main.length && f.stage.length ? 1 : 0);
+    const row = (g, v, n, label, extra = '') => `<label class="frow ${f[g].includes(v) ? 'on' : ''}"><input type="checkbox" data-fchip="${g}" data-v="${esc(v)}" ${f[g].includes(v) ? 'checked' : ''}> <span class="grow">${esc(label || v)}</span>${extra}<span class="small">${fmt(n || 0)}</span></label>`;
+    const col = (g, label, body, sel) => `<details class="fgroup" data-fg="${g}" ${fgOpen(g) ? 'open' : ''}><summary class="fg-h">${label}${sel ? ` <span class="pill brand">${fmt(sel)}</span> <button class="link" data-act="fclear" data-g="${g}">مسح</button>` : ''}</summary><div class="fg-list">${body}</div></details>`;
+    // عمود الحالة (شجرة)
+    const base = masterRows(['main', 'stage']);
+    const cM = new Map(), cS = new Map();
+    base.forEach(o => { cM.set(o.mainStatus, (cM.get(o.mainStatus) || 0) + 1); const k = groupOfMain(o.mainStatus) + '|' + o.stageName; cS.set(k, (cS.get(k) || 0) + 1); });
+    const SG = stageGroups();
+    const stageList = grp => { const items = SG[grp].filter(n => cS.get(grp + '|' + n) || f.stage.includes(n)); if (!items.length) return ''; const k = 'st-' + grp;
+      return `<details class="fg-node" data-fgnode="${k}" ${fgNodeOpen(k) || items.some(n => f.stage.includes(n)) ? 'open' : ''}><summary class="small">مراحل المخلّص (${fmt(items.length)})</summary><div class="fg-sub">${items.map(n => row('stage', n, cS.get(grp + '|' + n))).join('')}</div></details>`; };
+    const node = (st, grp) => (cM.get(st) || f.main.includes(st)) ? row('main', st, cM.get(st)) + (grp ? `<div class="fg-sub">${stageList(grp)}</div>` : '') : '';
+    const shipN = SHIPPED_ST.reduce((a, x) => a + (cM.get(x) || 0), 0), shipAll = SHIPPED_ST.every(x => f.main.includes(x)), shipSome = SHIPPED_ST.some(x => f.main.includes(x));
+    const tree = node('بانتظار الاعتماد', '') + node('صادر', 'issued') +
+      (shipN || shipSome ? `<label class="frow ${shipAll ? 'on' : ''}"><input type="checkbox" data-fparent="ship" ${shipAll ? 'checked' : ''} ${shipSome && !shipAll ? 'data-indet="1"' : ''}> <span class="grow"><b>مشحون</b></span><span class="small">${fmt(shipN)}</span></label>
+        <div class="fg-sub">${SHIPPED_ST.map(x => (cM.get(x) || f.main.includes(x)) ? row('main', x, cM.get(x), x.replace('مشحون — ', '')) : '').join('')}${stageList('shipped')}</div>` : '') +
+      node('وصل المستودع', 'arrived');
+    let cols = col('main', 'الحالة', tree, f.main.length + f.stage.length);
+    for (const [g, label] of mfGroups()) {
+      if (g === 'main' || g === 'stage') continue;
+      const b = masterRows(g), counts = new Map(); b.forEach(o => mfValue(g, o).forEach(v => counts.set(v, (counts.get(v) || 0) + 1)));
+      let vals = g === 'alert' ? ALERTS.slice() : g === 'pay' ? ['غير مسدد', 'مسدد جزئيًا', 'مسدد', 'غير محدد'] : g === 'shipc' ? ['الشحن مسجّل', 'الشحن فارغ'] : g === 'pod' ? ['تاريخ الأمر موجود', 'تاريخ الأمر فارغ'] : g === 'bl' ? ['البوليصة موجودة', 'البوليصة فارغة'] : [...new Set(masterAll().flatMap(o => mfValue(g, o)))].sort();
       vals = vals.filter(v => counts.get(v) || f[g].includes(v));
-      if (!vals.length) return '';
-      return `<div class="fgroup"><div class="fg-h">${label}${f[g].length ? ` <button class="link" data-act="fclear" data-g="${g}">مسح</button>` : ''}</div><div class="fg-chips">${vals.map(v => `<label class="fchip ${f[g].includes(v) ? 'on' : ''}"><input type="checkbox" data-fchip="${g}" data-v="${esc(v)}" ${f[g].includes(v) ? 'checked' : ''}> ${esc(v)} <span class="small">${fmt(counts.get(v) || 0)}</span></label>`).join('')}</div></div>`;
-    }).join('');
-    return `<details class="card filters no-print" ${ui.fopen === false ? '' : 'open'} data-fpanel><summary><b>الفلاتر</b>${active ? ` <span class="pill brand">${active} فلتر</span> <button class="link" data-act="fclearAll">مسح كل الفلاتر</button>` : ' <span class="small">(اختر أكثر من قيمة في نفس المجموعة)</span>'}</summary>
+      if (!vals.length) continue;
+      cols += col(g, label, vals.map(v => row(g, v, counts.get(v))).join(''), f[g].length);
+    }
+    return `<details class="card filters no-print" ${ui.fopen === false ? '' : 'open'} data-fpanel><summary><b>الفلاتر</b>${active ? ` <span class="pill brand">${active} فلتر</span> <button class="link" data-act="fclearAll">مسح كل الفلاتر</button>` : ' <span class="small">(اختر أكثر من قيمة في نفس العمود)</span>'} <button class="link" data-act="fgAll" data-k="1">فتح الكل</button> · <button class="link" data-act="fgAll" data-k="0">لم الكل</button></summary>
       <div class="toolbar" style="margin:10px 0 4px"><input type="search" id="qMaster" placeholder="بحث: رقم الأمر، البوليصة، الحاوية، المورد، الوكيل، الصنف…" value="${esc(f.q || '')}" data-search="m.q" style="min-width:380px"></div>
-      <div class="fgrid">${groups}</div></details>`;
+      <div class="fgrid">${cols}</div></details>`;
   }
   // الأعمدة: تختار اللي تبيه (ينحفظ على جهازك)
   const MASTER_COLS = () => [
@@ -2832,7 +2870,8 @@
     bulkPo: el => bulkPoModal(el.dataset.t),
     fonly: el => { const f = mfState(); MF_GROUPS.forEach(([g]) => { f[g] = []; }); f.q = ''; f[el.dataset.g] = [el.dataset.v]; if (el.dataset.main) f.main = el.dataset.main.split('|'); else if (el.dataset.g === 'alert' || el.dataset.g === 'main' && el.dataset.v !== 'وصل المستودع') { if (el.dataset.g === 'alert') f.main = E.MAIN_STATUSES.filter(x => x !== 'وصل المستودع'); } if (ui.tables.poList) ui.tables.poList.page = 0; ui.poTab = ui.poTab === 'cash' ? 'cash' : 'orders'; go('po'); },
     fclear: el => { mfState()[el.dataset.g] = []; render(); },
-    toggleStages: () => { try { localStorage.setItem('pp_show_stages', showStages() ? '0' : '1'); } catch (e) { /* */ } const f = mfState(); f.stage = []; f.alert = f.alert.filter(a => a !== 'متأخر في مرحلته'); render(); },
+    toggleStages: () => { try { localStorage.setItem('pp_show_stages', showStages() ? '0' : '1'); } catch (e) { /* */ } const f = mfState(); f.alert = f.alert.filter(a => a !== 'متأخر في مرحلته'); render(); },
+    fgAll: el => { const v = el.dataset.k === '1'; try { localStorage.setItem('pp_fg_open', JSON.stringify(Object.fromEntries(MF_GROUPS.map(([g]) => [g, v])))); localStorage.setItem('pp_fg_nodes', JSON.stringify(v ? { 'st-issued': true, 'st-shipped': true, 'st-arrived': true } : {})); } catch (e) { /* */ } render(); },
     fclearAll: () => { const f = mfState(); MF_GROUPS.forEach(([g]) => { f[g] = []; }); f.q = ''; render(); },
     poCols: () => poColsModal(),
     poApprove: async el => { await approvePos([el.dataset.k]); },
@@ -3064,7 +3103,13 @@
     if (fn) fn(el, e);
   });
 
-  document.addEventListener('toggle', e => { if (e.target.matches && e.target.matches('[data-fpanel]')) ui.fopen = e.target.open; }, true);
+  document.addEventListener('toggle', e => {
+    const t = e.target; if (!t.matches) return;
+    if (t.matches('[data-fpanel]')) ui.fopen = t.open;
+    const save = (key, k, v) => { try { const o = JSON.parse(localStorage.getItem(key) || '{}'); o[k] = v; localStorage.setItem(key, JSON.stringify(o)); } catch (er) { /* */ } };
+    if (t.matches('[data-fg]')) save('pp_fg_open', t.dataset.fg, t.open);
+    if (t.matches('[data-fgnode]')) save('pp_fg_nodes', t.dataset.fgnode, t.open);
+  }, true);
   let searchTimer;
   document.addEventListener('input', e => {
     const el = e.target;
@@ -3086,6 +3131,11 @@
 
   document.addEventListener('change', e => {
     const se = e.target;
+    if (se.dataset && se.dataset.fparent === 'ship') {
+      const f = mfState();
+      f.main = se.checked ? [...new Set(f.main.concat(SHIPPED_ST))] : f.main.filter(x => !SHIPPED_ST.includes(x));
+      if (ui.tables.poList) ui.tables.poList.page = 0; ui.keepScroll = true; return render();
+    }
     if (se.dataset && se.dataset.fchip) {
       const f = mfState(), g = se.dataset.fchip, v = se.dataset.v;
       f[g] = se.checked ? [...new Set(f[g].concat([v]))] : f[g].filter(x => x !== v);
