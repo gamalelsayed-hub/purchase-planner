@@ -575,11 +575,11 @@
   // ---------- الخط الناقل وتتبع الشحنة ----------
   // بادئة الحاوية (أول 4 حروف) أو بادئة البوليصة ← الخط الناقل + رابط صفحة التتبع ({n} = رقم الحاوية أو البوليصة)
   const CARRIERS = [
-    { id: 'CMA', name: 'CMA CGM', cont: ['ECMU', 'CMAU', 'APZU', 'APHU', 'CGMU', 'APLU'], bl: ['CMDU', 'CMAU', 'APLU'], url: 'https://www.cma-cgm.com/ebusiness/tracking/search?SearchBy=Container&Reference={n}' },
-    { id: 'MAERSK', name: 'Maersk', cont: ['MSKU', 'MRKU', 'MAEU', 'MRSU', 'MCRU', 'SEAU', 'SUDU'], bl: ['MAEU', 'MSKU', 'SEAU', 'SUDU'], url: 'https://www.maersk.com/tracking/{n}' },
+    { id: 'CMA', name: 'CMA CGM', cont: ['ECMU', 'CMAU', 'APZU', 'APHU', 'CGMU'], bl: ['CMDU', 'CMAU', 'APLU'], url: 'https://www.cma-cgm.com/ebusiness/tracking/search?SearchBy=Container&Reference={n}' },
+    { id: 'MAERSK', name: 'Maersk', cont: ['MSKU', 'MRKU', 'MAEU', 'MRSU', 'SUDU'], bl: ['MAEU', 'MSKU', 'SEAU', 'SUDU'], url: 'https://www.maersk.com/tracking/{n}' },
     { id: 'MSC', name: 'MSC', cont: ['MSCU', 'MEDU', 'MSDU', 'MSMU', 'MSNU'], bl: ['MEDU', 'MSCU'], url: 'https://www.msc.com/en/track-a-shipment?trackingNumber={n}' },
     { id: 'HAPAG', name: 'Hapag-Lloyd', cont: ['HLCU', 'HLXU', 'HLBU', 'UACU', 'UASU'], bl: ['HLCU'], url: 'https://www.hapag-lloyd.com/en/online-business/track/track-by-container-solution.html?container={n}' },
-    { id: 'COSCO', name: 'COSCO', cont: ['COSU', 'CSNU', 'CBHU', 'CCLU', 'CSLU', 'FCIU'], bl: ['COSU', 'COAU'], url: 'https://elines.coscoshipping.com/ebusiness/cargoTracking?trackingType=CONTAINER&number={n}' },
+    { id: 'COSCO', name: 'COSCO', cont: ['COSU', 'CBHU', 'CCLU'], bl: ['COSU', 'COAU'], url: 'https://elines.coscoshipping.com/ebusiness/cargoTracking?trackingType=CONTAINER&number={n}' },
     { id: 'OOCL', name: 'OOCL', cont: ['OOLU', 'OOCU'], bl: ['OOLU'], url: 'https://www.oocl.com/eng/ourservices/eservices/cargotracking/Pages/cargotracking.aspx?ref={n}' },
     { id: 'ONE', name: 'ONE', cont: ['ONEU', 'NYKU', 'MOLU', 'KKFU'], bl: ['ONEY'], url: 'https://ecomm.one-line.com/one-ecom/manage-shipment/cargo-tracking?trakNoParam={n}' },
     { id: 'EVERGREEN', name: 'Evergreen', cont: ['EGHU', 'EMCU', 'EISU', 'EITU', 'EGSU'], bl: ['EGLV'], url: 'https://ct.shipmentlink.com/servlet/TDB1_CargoTracking.do?SEARCH_TYPE=CNTR&NO={n}' },
@@ -601,13 +601,15 @@
   const prefixesOf = o => ({ cont: [...new Set(((o.track || {}).containers || []).map(c => String(c.no || '').replace(/\s+/g, '').slice(0, 4).toUpperCase()).filter(Boolean))], bl: String(o.blNo || '').replace(/\s+/g, '').toUpperCase().slice(0, 4) });
   function carrierOf(o, db) {
     const t = o.track || {}, map = (db && db.carrierMap) || {}, px = prefixesOf(o);
-    if (t.carrier) return carrierById(t.carrier);
-    for (const k of px.cont) { const c = CARRIERS.find(x => x.cont.includes(k)); if (c) return c; }
-    for (const k of px.cont) if (map['C:' + k]) return carrierById(map['C:' + k]);
-    const b = CARRIERS.find(x => x.bl.includes(px.bl)); if (b) return b;
-    if (px.bl && map['B:' + px.bl]) return carrierById(map['B:' + px.bl]);
+    const tag = (c, src) => c ? Object.assign({}, c, { src }) : null;
+    if (t.carrier) return tag(carrierById(t.carrier), 'يدوي');
+    const b = CARRIERS.find(x => px.bl && x.bl.includes(px.bl)); if (b) return tag(b, 'من البوليصة');
+    for (const k of px.cont) { const c = CARRIERS.find(x => x.cont.includes(k)); if (c) return tag(c, 'من الحاوية'); }
+    if (px.bl && map['B:' + px.bl]) return tag(carrierById(map['B:' + px.bl]), 'متعلَّم من البوليصة');
+    for (const k of px.cont) if (map['C:' + k]) return tag(carrierById(map['C:' + k]), 'متعلَّم من الحاوية');
     return null;
   }
+  const genericUrl = n => n ? genericTrack.replace('{n}', encodeURIComponent(String(n).replace(/\s+/g, ''))) : '';
   function trackUrl(o, contNo, db) {
     const c = carrierOf(o, db), n = contNo || ((o.track || {}).containers || [])[0] && o.track.containers[0].no || o.blNo || '';
     return n ? (c ? c.url : genericTrack).replace('{n}', encodeURIComponent(String(n).replace(/\s+/g, ''))) : '';
@@ -756,7 +758,7 @@
   }
 
   const Engine = {
-    CARRIERS, carrierOf, trackUrl, prefixesOf, compute, openPoLines, poSummary, defaultShipStages, trackStageIndex, setTrackStage, trackSummary, poAutoEta, poPrepDays, poExpectedShip, addDaysDate, stageOf, STAGE_LABEL, poPlan, stageDur, isForeign, MAIN_STATUSES, mainStatusOf, dayDiff, poLead, addMonthsDate, fxRate, normsinv, normUnit, normCode, num, toMonth, monthAdd, monthLabel,
+    CARRIERS, carrierOf, trackUrl, genericUrl, prefixesOf, compute, openPoLines, poSummary, defaultShipStages, trackStageIndex, setTrackStage, trackSummary, poAutoEta, poPrepDays, poExpectedShip, addDaysDate, stageOf, STAGE_LABEL, poPlan, stageDur, isForeign, MAIN_STATUSES, mainStatusOf, dayDiff, poLead, addMonthsDate, fxRate, normsinv, normUnit, normCode, num, toMonth, monthAdd, monthLabel,
     unitFactor, purchaseFactor, allUnits, emptyDb, defaultSettings, defaultClasses, abc, roundUp, exceptionApplies
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Engine;

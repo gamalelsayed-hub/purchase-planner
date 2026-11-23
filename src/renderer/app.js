@@ -1435,7 +1435,7 @@
     { k: 'stageIdx', h: 'مراحل المخلّص', def: true, sv: o => o.stageIdx, v: o => o.foreign ? (o.stageName || '') : 'محلي (بدون مراحل شحن)', f: o => o.foreign ? trackPill(o.trackPill) + (o.daysIn != null && !o.closed ? ` <span class="small" style="${o.late ? 'color:var(--bad);font-weight:700' : ''}">${fmt(o.daysIn)}/${fmt(o.stageDays || 0)} يوم</span>` : '') : '<span class="small">محلي (بدون مراحل شحن)</span>' },
     { k: 'poDate', h: 'تاريخ الأمر', def: true },
     { k: 'supplier', h: 'المورد', def: true }, { k: 'costCenter', h: 'مركز التكلفة (كما في النظام)', cls: 'wrap' }, { k: 'warehouse', h: 'المخزن', def: true, v: o => whLabel(o.warehouse) }, { k: 'forwarder', h: 'CO', def: true }, { k: 'clearer', h: 'المخلّص', def: true },
-    { k: 'carrier', h: 'الخط الناقل', def: true, v: o => (E.carrierOf(db.po.orders[o.no], db) || {}).name || '', f: o => { const po = db.po.orders[o.no], c = E.carrierOf(po, db), u = E.trackUrl(po, '', db); return (c ? esc(c.name) : '<span class="muted">—</span>') + (u ? ` <button class="sm" data-act="openTrack" data-k="${esc(o.no)}" title="فتح صفحة التتبع">🔗</button>` : ''); } },
+    { k: 'carrier', h: 'الخط الناقل', def: true, v: o => (E.carrierOf(db.po.orders[o.no], db) || {}).name || '', f: o => { const po = db.po.orders[o.no], c = E.carrierOf(po, db), u = E.trackUrl(po, '', db); return (c ? esc(c.name) + (c.src && c.src !== 'يدوي' ? ` <span class="small" title="${esc(c.src)}">؟</span>` : '') : '<span class="muted">—</span>') + (u ? ` <button class="sm" data-act="openTrack" data-k="${esc(o.no)}" title="فتح صفحة التتبع">🔗</button>` : ''); } },
     { k: 'vessel', h: 'السفينة / الرحلة', v: o => { const t = db.po.orders[o.no].track || {}; return [t.vessel, t.voyage].filter(Boolean).join(' / '); } },
     { k: 'trackStatus', h: 'آخر حالة تتبع', cls: 'wrap', v: o => { const t = db.po.orders[o.no].track || {}; return t.trackStatus ? t.trackStatus + (t.trackStatusAt ? ' (' + t.trackStatusAt + ')' : '') : ''; } },
     { k: 'blNo', h: 'البوليصة', def: true, f: o => esc(o.blNo) + (o.docType ? ` <span class="small">(${esc(o.docType)})</span>` : '') },
@@ -1924,10 +1924,10 @@
   function shipTrackHtml(o, ok) {
     const t = o.track || {}, auto = E.carrierOf(Object.assign({}, o, { track: Object.assign({}, t, { carrier: '' }) }), db), dis = ok ? '' : 'disabled';
     const conts = t.containers || [];
-    const link = (n, label) => { const u = E.trackUrl(o, n, db); return u ? `<button class="sm" data-trackurl="${esc(u)}">🔗 ${esc(label)}</button>` : ''; };
+    const link = (n, label) => { const u = E.trackUrl(o, n, db), g = E.genericUrl(n || o.blNo); return (u ? `<button class="sm" data-trackurl="${esc(u)}" title="موقع الخط الناقل">🔗 ${esc(label)}</button>` : '') + (g && g !== u ? `<button class="sm" data-trackurl="${esc(g)}" title="بحث عام في كل الخطوط (track-trace)">🔎</button>` : ''); };
     return `<h3>تتبع الشحنة</h3>
       <div class="form f4">
-        <label class="f">الخط الناقل${auto ? ` <span class="small">(تلقائي: ${esc(auto.name)})</span>` : ''}<select id="tk_carrier" ${dis}><option value="">${auto ? 'تلقائي — ' + esc(auto.name) : '— غير معروف —'}</option>${E.CARRIERS.map(c => `<option value="${c.id}" ${t.carrier === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+        <label class="f">الخط الناقل${auto ? ` <span class="small">(تلقائي ${esc(auto.src || '')}: ${esc(auto.name)})</span>` : ''}<select id="tk_carrier" ${dis}><option value="">${auto ? 'تلقائي — ' + esc(auto.name) : '— غير معروف —'}</option>${E.CARRIERS.map(c => `<option value="${c.id}" ${t.carrier === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
         <label class="f">اسم السفينة<input id="tk_vessel" value="${esc(t.vessel || '')}" ${dis}></label>
         <label class="f">رقم الرحلة<input id="tk_voyage" value="${esc(t.voyage || '')}" ${dis}></label>
         <label class="f">ETA الباخرة (من موقع الخط)<input id="tk_eta" type="date" value="${esc(t.vesselEta || '')}" ${dis}></label>
