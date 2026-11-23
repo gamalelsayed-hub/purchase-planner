@@ -598,6 +598,25 @@
   // كل معاملة: سطر مسلسل ← سطر بيانات (الحالة، المنشأ، المنفذ، التواريخ، الحاويات، الوكيل، البوليصة، رقم المعاملة)
   // ← سطر ملاحظات (فيه رقم أمر الشراء غالبًا) + الحالة بالعربي + علامات (*). الأعمدة تتحرك، فنتعرف على كل قيمة من شكلها.
   const CONT_RE = /[A-Za-z]{4}\s?\d{6,7}/g;
+  const splitContainers = v => { const s = String(v || '').toUpperCase(); const m = s.match(CONT_RE); CONT_RE.lastIndex = 0; return m ? m.map(x => x.replace(/\s+/g, '')) : (s.trim() ? [s.replace(/\s+/g, '')] : []); };
+  // تنظيف حاويات محفوظة كسطر واحد فيه أكثر من رقم ← سطر لكل حاوية (التواريخ تنتقل للي ما عنده)
+  function fixMergedContainers(db) {
+    let n = 0;
+    for (const o of Object.values((db.po && db.po.orders) || {})) {
+      const cs = (o.track && o.track.containers) || []; if (!cs.length) continue;
+      const out = [];
+      for (const c of cs) {
+        const parts = splitContainers(c.no);
+        for (const no of parts.length ? parts : [c.no]) {
+          let x = out.find(y => y.no === no);
+          if (!x) { x = Object.assign({}, c, { no }); out.push(x); } else for (const k of ['portAt', 'warehouseAt', 'emptyAt', 'type']) if (!x[k] && c[k]) x[k] = c[k];
+        }
+        if (parts.length > 1) n++;
+      }
+      o.track.containers = out;
+    }
+    return n;
+  }
   const isSerialDate = v => typeof v === 'number' && v > 40000 && v < 60000;
   const serialToIso = v => new Date(Math.round((v - 25569) * 86400000)).toISOString().slice(0, 10);
   function isClearerReport(sheets) {
@@ -747,7 +766,8 @@
     for (const r of recs) {
       res.rows++;
       const cn = String(r.containerNo || '').trim().toUpperCase();
-      const conts = (r.containers && r.containers.length ? r.containers : (cn ? [cn] : [])).map(x => String(x).replace(/\s+/g, '').toUpperCase());
+      // خانة فيها أكثر من حاوية («TSSU2470630|TSSU2470749» أو بفاصلة/مسافة) ← كل حاوية لحالها
+      const conts = [...new Set((r.containers && r.containers.length ? r.containers : (cn ? [cn] : [])).flatMap(x => splitContainers(x)))];
       const o = (r.poNo && po.orders[r.poNo]) || (r.blNo && orders.find(x => x.blNo && norm(x.blNo) === norm(r.blNo))) ||
         (conts.length && orders.find(x => ((x.track || {}).containers || []).some(c => conts.includes(c.no))));
       if (!o) { res.notFound.push(r.poNo || r.blNo || conts[0] || '?'); continue; }
@@ -924,7 +944,7 @@
     if (/يورو|eur/i.test(t)) return 'EUR';
     return '';
   }
-  const Importers = { applyVouchers, voucherPlan, applyDocs, docsVal, FLAG_COLS, parseClearerPdf, defaultClearerForm, isClearerReport, parseClearerReport, DEFAULT_CLEARER_MAP, applyTrack, mapTrackStatus, currencyFromHeader, KINDS, applyPOs, applyPOPay, toDate, curCode, detectHeader, rowsToRecords, applyItems, applySales, applyStock, applyTransit, autoAddItems, importLegacy, isLegacyWorkbook, syncGroups, parseActive };
+  const Importers = { fixMergedContainers, splitContainers, applyVouchers, voucherPlan, applyDocs, docsVal, FLAG_COLS, parseClearerPdf, defaultClearerForm, isClearerReport, parseClearerReport, DEFAULT_CLEARER_MAP, applyTrack, mapTrackStatus, currencyFromHeader, KINDS, applyPOs, applyPOPay, toDate, curCode, detectHeader, rowsToRecords, applyItems, applySales, applyStock, applyTransit, autoAddItems, importLegacy, isLegacyWorkbook, syncGroups, parseActive };
   if (typeof module !== 'undefined' && module.exports) module.exports = Importers;
   else root.Importers = Importers;
 })(typeof window !== 'undefined' ? window : globalThis);

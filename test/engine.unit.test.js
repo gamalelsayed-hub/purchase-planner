@@ -437,4 +437,17 @@ assert.strictEqual(db.po.orders.K1.track.stage, 'emptyReturned'); assert.ok(db.p
   assert.strictEqual(d11.po.orders.B1.shipAwardDate, '2026-11-03');
 }
 
+// حاوية مدموجة «A|B» ← تنفصل (في الاستيراد وفي البيانات القديمة)
+{
+  const d12 = E.emptyDb();
+  d12.po.orders.C1 = { no: 'C1', status: 'open', currency: 'USD', lines: [], payments: [], track: { history: [], containers: [{ no: 'TSSU2470630', portAt: '2026-11-16' }, { no: 'TSSU2470749', portAt: '2026-11-16' }, { no: 'TSSU2470630|TSSU2470749', portAt: '2026-11-21', emptyAt: '2026-11-25' }] } };
+  I.fixMergedContainers(d12);
+  const cs = d12.po.orders.C1.track.containers;
+  assert.deepStrictEqual(cs.map(c => c.no), ['TSSU2470630', 'TSSU2470749']);
+  assert.strictEqual(cs[0].portAt, '2026-11-16', 'existing date kept'); assert.strictEqual(cs[0].emptyAt, '2026-11-25', 'missing date filled');
+  d12.po.orders.C2 = { no: 'C2', status: 'open', currency: 'USD', lines: [], payments: [] };
+  I.applyTrack(d12, [{ poNo: 'C2', containerNo: 'MSKU1234567 | MSKU7654321' }], { date: '2026-11-23' });
+  assert.deepStrictEqual(d12.po.orders.C2.track.containers.map(c => c.no), ['MSKU1234567', 'MSKU7654321']);
+}
+
 console.log('✓ all engine unit tests passed');

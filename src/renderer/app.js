@@ -216,6 +216,8 @@
     }
     // كل أوامر الشراء خارجية: الأوامر بالريال (غير المعدّلة يدويًا) ← عملة الاستيراد
     if ((d.meta.foreignV || 0) < 1) { if (d.settings.allPoForeign !== false) toForeignCurrency(d); d.meta.foreignV = 1; }
+    // حاويات انحفظت كسطر واحد فيه رقمين («TSSU2470630|TSSU2470749») ← تنفصل
+    if ((d.meta.contFixV || 0) < 1) { I.fixMergedContainers(d); d.meta.contFixV = 1; }
     // قائمة المخازن (رقم ← اسم) — تبدأ من أرقام المخازن الموجودة في أوامر الشراء
     if (!Array.isArray(d.warehouses)) d.warehouses = [{ code: '1002', name: 'المركزي' }, { code: '1101', name: 'الخمرة' }, { code: '1201', name: 'الرياض' }];
     for (const o of Object.values((d.po && d.po.orders) || {})) for (const l of o.lines || []) { const c = String(l.warehouse || '').trim(); if (c && !d.warehouses.some(w => w.code === c)) d.warehouses.push({ code: c, name: '' }); }
@@ -1982,10 +1984,11 @@
     if (go) go.onclick = () => { save(); saveTrack(); E.setTrackStage(db, o, m.q('#t_stage').value, { date: m.q('#t_date').value || today(), by: ui.user.name, note: m.q('#t_note').value.trim() }); log(`أمر الشراء ${o.no}: ${stageName(o.track.stage)}`); reopenModal(); };
     const ca = m.q('#t_cadd');
     if (ca) ca.onclick = () => {
-      const no = m.q('#t_cno').value.trim().toUpperCase(); if (!no) return toast('اكتب رقم الحاوية', 'bad');
+      const nos = I.splitContainers(m.q('#t_cno').value); if (!nos.length) return toast('اكتب رقم الحاوية', 'bad');
       save(); saveTrack(); o.track.containers = o.track.containers || [];
-      if (o.track.containers.some(c => c.no === no)) return toast('الحاوية موجودة', 'bad');
-      o.track.containers.push({ no }); log(`حاوية ${no} لأمر الشراء ${o.no}`); reopenModal();
+      const add = nos.filter(no => !o.track.containers.some(c => c.no === no));
+      if (!add.length) return toast('الحاوية موجودة', 'bad');
+      add.forEach(no => o.track.containers.push({ no })); log(`حاوية ${add.join('، ')} لأمر الشراء ${o.no}`); reopenModal();
     };
     m.q('.modal-body').addEventListener('change', e => {
       const d = e.target.closest('[data-cdate]'); if (!d) return;
