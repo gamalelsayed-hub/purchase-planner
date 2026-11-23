@@ -808,7 +808,7 @@
 
   // ---------- قائمة الطلب ----------
   // قيود العرض للمستخدم في طلب الشراء: الأنواع اللي يشوفها، والأعمدة المخفية عنه
-  const ORDER_HIDEABLE = [['mainItem', 'الصنف الرئيسي'], ['type', 'النوع'], ['cls', 'التصنيف'], ['purchaseUnit', 'الوحدة'], ['avgP', 'متوسط شهري'], ['stockP', 'المخزون'], ['transitP', 'بالطريق'], ['maxP', 'الحد الأقصى'], ['suggested', 'الطلب المقترح'], ['delta', 'تعديل (+/−)'], ['costP', 'تكلفة الوحدة'], ['coverageAfter', 'التغطية بعد الطلب'], ['orderValue', 'قيمة الطلب'], ['reason', 'سبب التعديل'], ['status', 'الحالة']];
+  const ORDER_HIDEABLE = [['mainItem', 'الصنف الرئيسي'], ['type', 'النوع'], ['cls', 'التصنيف'], ['purchaseUnit', 'الوحدة'], ['avgP', 'متوسط شهري'], ['stockP', 'المخزون'], ['transitP', 'بالطريق'], ['incoming', 'شحنة قادمة'], ['maxP', 'الحد الأقصى'], ['suggested', 'الطلب المقترح'], ['delta', 'تعديل (+/−)'], ['costP', 'تكلفة الوحدة'], ['coverageAfter', 'التغطية بعد الطلب'], ['orderValue', 'قيمة الطلب'], ['reason', 'سبب التعديل'], ['status', 'الحالة']];
   function myView() {
     const u = (ui.user && db.users.find(x => x.username === ui.user.username)) || ui.user || {};
     const types = Array.isArray(u.orderTypes) ? u.orderTypes.filter(t => db.types.some(x => x.name === t)) : [];
@@ -834,6 +834,32 @@
       (f.show === 'all' ? true : f.show === 'adjusted' ? r.delta !== 0 : r.final > 0) &&
       (!q || r.code.toLowerCase().includes(q) || r.name.toLowerCase().includes(q) || r.mainItem.toLowerCase().includes(q)));
   }
+  // الشحنات القادمة لكل صنف (من أوامر الشراء المفتوحة المعتمدة): أقرب وصول متوقع، والكمية المتبقية، والأوامر، والتأخير
+  function incomingByItem() {
+    return memo('incoming', () => {
+      const m = new Map(), late = num(db.settings.shipLateDays) || 7;
+      for (const o of poSum()) {
+        if (o.status !== 'open' || o.pending) continue;
+        const po = db.po.orders[o.no];
+        for (const l of po.lines || []) {
+          if (!(num(l.remaining) > 0)) continue;
+          const g = m.get(l.code) || { eta: '', qty: 0, unit: l.unit, nos: [], late: false, shipped: false };
+          g.qty += num(l.remaining); g.nos.push(o.no);
+          if (o.eta && (!g.eta || o.eta < g.eta)) g.eta = o.eta;
+          if (o.daysToEta != null && o.daysToEta < -late) g.late = true;
+          if (/^مشحون/.test(o.mainStatus)) g.shipped = true;
+          m.set(l.code, g);
+        }
+      }
+      return m;
+    });
+  }
+  const incomingCell = r => {
+    const g = incomingByItem().get(r.code); if (!g) return '';
+    const d = E.dayDiff(g.eta, today());
+    return `<span class="pill ${g.late ? 'bad' : d <= 30 ? 'warn' : ''}" title="أوامر: ${esc(g.nos.join('، '))} — المتبقي ${fmt(g.qty)} ${esc(g.unit || '')}${g.shipped ? ' — فيه شحنة مشحونة' : ''}">${g.shipped ? '🚢 ' : ''}${esc(g.eta)}${g.late ? ' متأخر ' + fmt(-d) + ' يوم' : ''}</span>`;
+  };
+  const incomingVal = r => { const g = incomingByItem().get(r.code); return g ? g.eta + (g.late ? ' متأخر' : '') : ''; };
   const ORDER_COLS = () => [
     { k: 'idx', h: 'م', nosort: true, f: (r, i) => i + 1, n: true },
     { k: 'code', h: 'رقم الصنف' },
@@ -845,6 +871,7 @@
     { k: 'avgP', h: 'متوسط شهري', n: true, v: r => r.avg / r.pf, d: 1 },
     { k: 'stockP', h: 'المخزون', n: true, v: r => r.stock / r.pf, d: 1 },
     { k: 'transitP', h: 'بالطريق', n: true, v: r => r.transit / r.pf, d: 1 },
+    { k: 'incoming', h: 'شحنة قادمة — توصل', v: incomingVal, f: incomingCell },
     { k: 'maxP', h: 'الحد الأقصى', n: true, v: r => r.maxLevel / r.pf, d: 1 },
     { k: 'suggested', h: 'الطلب المقترح', n: true },
     { k: 'delta', h: 'تعديل (+/−)', n: true, f: r => ui.printing ? (r.delta ? fmt(r.delta, 2) : '') : `<input class="cell-input" type="number" step="any" id="adj_${esc(r.code)}" data-chg="adj" data-code="${esc(r.code)}" value="${r.delta || ''}">` },
@@ -854,7 +881,7 @@
     { k: 'orderValue', h: 'قيمة الطلب', n: true, f: r => money(r.orderValue) },
     { k: 'reason', h: 'سبب التعديل', f: r => ui.printing ? esc(r.reason) : `<input class="cell-input wide" id="rsn_${esc(r.code)}" data-chg="reason" data-code="${esc(r.code)}" value="${esc(r.reason)}" ${r.delta || r.reason ? '' : 'placeholder="—"'}>` },
     { k: 'status', h: 'الحالة', f: r => statusPill(r) }
-  ].filter(c => (!ui.printing || !['mainItem', 'status', 'costP'].includes(c.k)) && !myView().hide.includes(c.k) && (myView().money || !['costP', 'orderValue'].includes(c.k)));
+  ].filter(c => (!ui.printing || !['mainItem', 'status', 'costP', 'incoming'].includes(c.k)) && !myView().hide.includes(c.k) && (myView().money || !['costP', 'orderValue'].includes(c.k)));
   function statusPill(r) {
     const c = r.status === 'يطلب' ? 'brand' : r.status === 'لا يطلب' ? '' : r.status === 'موقوف' ? '' : 'bad';
     return `<span class="pill ${c}">${r.status}</span>${r.autoAdded ? ' <span class="pill warn" title="غير مصنف — مضاف تلقائيًا">جديد</span>' : ''}${r.excMonths ? ` <span class="pill warn" title="فترة استثنائية +${r.excMonths} شهر">+${r.excMonths}</span>` : ''}`;
@@ -904,7 +931,7 @@
       { k: 'cls', h: 'التصنيف', f: r => `<span class="cls">${r.cls}</span>${r.clsManual ? ' ✎' : ''}` }, { k: 'clsAuto', h: 'التلقائي' }, { k: 'service', h: 'الخدمة', n: true, f: r => pct(r.service) }, { k: 'z', h: 'Z', n: true, d: 3 },
       { k: 'lead', h: 'التوصيل', n: true, d: 2 }, { k: 'extraMonths', h: 'أشهر إضافية', n: true, d: 2 },
       { k: 'expected', h: 'الطلب المتوقع', n: true, d: 1 }, { k: 'safety', h: 'مخزون الأمان', n: true, d: 1 }, { k: 'extra', h: 'المخزون الإضافي', n: true, d: 1 },
-      { k: 'maxLevel', h: 'الحد الأقصى', n: true, d: 1 }, { k: 'stock', h: 'المخزون', n: true, d: 2 }, { k: 'transit', h: 'بالطريق', n: true, d: 2 },
+      { k: 'maxLevel', h: 'الحد الأقصى', n: true, d: 1 }, { k: 'stock', h: 'المخزون', n: true, d: 2 }, { k: 'transit', h: 'بالطريق', n: true, d: 2 }, { k: 'incoming', h: 'شحنة قادمة — توصل', v: incomingVal, f: incomingCell },
       { k: 'suggested', h: 'المقترح (وحدة الشراء)', n: true }, { k: 'final', h: 'النهائي', n: true }, { k: 'orderValue', h: 'قيمة الطلب', n: true },
       { k: 'coverage', h: 'التغطية الحالية', n: true, d: 1 }, { k: 'status', h: 'الحالة' }, { k: 'notes', h: 'ملاحظات', v: r => r.notes.join('؛ ') }
     ].filter(c => !calcHidden().has(c.k));
@@ -1408,6 +1435,9 @@
     { k: 'stageIdx', h: 'مراحل المخلّص', def: true, sv: o => o.stageIdx, v: o => o.foreign ? (o.stageName || '') : 'محلي (بدون مراحل شحن)', f: o => o.foreign ? trackPill(o.trackPill) + (o.daysIn != null && !o.closed ? ` <span class="small" style="${o.late ? 'color:var(--bad);font-weight:700' : ''}">${fmt(o.daysIn)}/${fmt(o.stageDays || 0)} يوم</span>` : '') : '<span class="small">محلي (بدون مراحل شحن)</span>' },
     { k: 'poDate', h: 'تاريخ الأمر', def: true },
     { k: 'supplier', h: 'المورد', def: true }, { k: 'costCenter', h: 'مركز التكلفة (كما في النظام)', cls: 'wrap' }, { k: 'warehouse', h: 'المخزن', def: true, v: o => whLabel(o.warehouse) }, { k: 'forwarder', h: 'CO', def: true }, { k: 'clearer', h: 'المخلّص', def: true },
+    { k: 'carrier', h: 'الخط الناقل', def: true, v: o => (E.carrierOf(db.po.orders[o.no], db) || {}).name || '', f: o => { const po = db.po.orders[o.no], c = E.carrierOf(po, db), u = E.trackUrl(po, '', db); return (c ? esc(c.name) : '<span class="muted">—</span>') + (u ? ` <button class="sm" data-act="openTrack" data-k="${esc(o.no)}" title="فتح صفحة التتبع">🔗</button>` : ''); } },
+    { k: 'vessel', h: 'السفينة / الرحلة', v: o => { const t = db.po.orders[o.no].track || {}; return [t.vessel, t.voyage].filter(Boolean).join(' / '); } },
+    { k: 'trackStatus', h: 'آخر حالة تتبع', cls: 'wrap', v: o => { const t = db.po.orders[o.no].track || {}; return t.trackStatus ? t.trackStatus + (t.trackStatusAt ? ' (' + t.trackStatusAt + ')' : '') : ''; } },
     { k: 'blNo', h: 'البوليصة', def: true, f: o => esc(o.blNo) + (o.docType ? ` <span class="small">(${esc(o.docType)})</span>` : '') },
     { k: 'containers', h: 'الحاويات', def: true, v: o => o.containers.map(c => c.no).join(' '), f: o => o.containers.length ? `${fmt(o.containers.length)} <span class="small">(${fmt(o.containersOpen)} لم تُسلّم)</span>` : '' },
     { k: 'demurrageLeft', h: 'أيام السماح', def: true, n: true, f: o => demCell(o) },
@@ -1737,6 +1767,7 @@
         <label class="f">الوصول المتوقع — فارغ = تلقائي (${esc(auto || '—')})<input id="o_eta" type="date" value="${esc(o.etaManual ? o.eta : '')}" ${dis(canSt)}></label>
         <label class="f full">ملاحظة<input id="o_note" value="${esc(o.note || '')}" ${dis(canPay || canSt)}></label>
       </div>
+      ${shipTrackHtml(o, canSt || canPay || can('shipping'))}
       <details class="stages-box" ${showStages() ? 'open' : ''} style="margin-top:14px"><summary style="cursor:pointer"><b>تحديث مراحل المخلّص</b> <span class="small">(للاستعراض — الحالة تتحدد من أونكس والمحاسب بس)</span></summary>${trackSectionHtml(o)}</details>
       <h3>المرفقات (البوليصة والأوراق)</h3>
       ${table('poAtt', [
@@ -1791,6 +1822,7 @@
           }
           if (canPay || canSt) {
             o.note = m.q('#o_note').value.trim(); o.poDate = m.q('#o_pd').value;
+            saveShipTrack(m, o);
             o.shipDate = m.q('#o_sd').value; o.shipAwardDate = m.q('#o_award').value;
             const sm2 = m.q('#o_shipm').value === 'yes'; if (!!o.shippedManual !== sm2) { if (sm2) o.shippedManual = true; else delete o.shippedManual; log(`أمر الشراء ${no}: ${sm2 ? 'مشحون (يدوي)' : 'إلغاء مشحون يدوي'}`); }
             const dm = m.q('#o_docs').value; if ((o.docsManual === 'yes' ? 'yes' : '') !== dm) { if (dm) o.docsManual = 'yes'; else delete o.docsManual; log(`أمر الشراء ${no}: ${dm ? 'استلمنا الأوراق' : 'ما استلمنا الأوراق'}`); }
@@ -1888,6 +1920,40 @@
       <details style="margin-top:10px"><summary class="small" style="cursor:pointer">سجل المراحل (${fmt(t.history.length)})</summary>
       ${table('trkHist', [{ k: 'at', h: 'التاريخ' }, { k: 'stage', h: 'المرحلة', v: h => stageName(h.stage) }, { k: 'note', h: 'ملاحظة', cls: 'wrap' }, { k: 'by', h: 'بواسطة' }, { k: 'source', h: 'المصدر', v: h => h.source === 'sheet' ? 'شيت' : h.source === 'manual' ? 'يدوي' : h.source }], t.history.slice().reverse(), { static: true, short: true, empty: 'لا يوجد' })}</details>`;
   }
+  // تتبع الشحنة: الخط الناقل (تلقائي من بادئة الحاوية/البوليصة أو يدوي)، السفينة، الرحلة، ETA الباخرة، آخر حالة، وروابط التتبع
+  function shipTrackHtml(o, ok) {
+    const t = o.track || {}, auto = E.carrierOf(Object.assign({}, o, { track: Object.assign({}, t, { carrier: '' }) }), db), dis = ok ? '' : 'disabled';
+    const conts = t.containers || [];
+    const link = (n, label) => { const u = E.trackUrl(o, n, db); return u ? `<button class="sm" data-trackurl="${esc(u)}">🔗 ${esc(label)}</button>` : ''; };
+    return `<h3>تتبع الشحنة</h3>
+      <div class="form f4">
+        <label class="f">الخط الناقل${auto ? ` <span class="small">(تلقائي: ${esc(auto.name)})</span>` : ''}<select id="tk_carrier" ${dis}><option value="">${auto ? 'تلقائي — ' + esc(auto.name) : '— غير معروف —'}</option>${E.CARRIERS.map(c => `<option value="${c.id}" ${t.carrier === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+        <label class="f">اسم السفينة<input id="tk_vessel" value="${esc(t.vessel || '')}" ${dis}></label>
+        <label class="f">رقم الرحلة<input id="tk_voyage" value="${esc(t.voyage || '')}" ${dis}></label>
+        <label class="f">ETA الباخرة (من موقع الخط)<input id="tk_eta" type="date" value="${esc(t.vesselEta || '')}" ${dis}></label>
+        <label class="f full">آخر حالة تتبع<input id="tk_status" value="${esc(t.trackStatus || '')}" placeholder="مثال: Discharged at Jeddah / On board vessel" ${dis}></label>
+        <label class="f">تاريخ آخر تحديث<input id="tk_at" type="date" value="${esc(t.trackStatusAt || '')}" ${dis}></label>
+      </div>
+      <div class="row-flex" style="margin-top:6px">${conts.length ? conts.map(c => link(c.no, c.no)).join('') : link('', o.blNo ? 'البوليصة ' + o.blNo : '')}${!conts.length && !o.blNo ? '<span class="small">أضف رقم البوليصة أو الحاوية عشان يطلع رابط التتبع</span>' : ''}</div>
+      <p class="small">ETA الباخرة يدخل حساب الوصول المتوقع (أيهما أقرب مع وصول المخلّص والشحن الفعلي + ${fmt(num(db.settings.shipTransitDays) || 30)}). لو اخترت الخط يدويًا، الأوامر اللي حاوياتها أو بوليصتها بنفس البادئة تاخذه تلقائيًا.</p>`;
+  }
+  function saveShipTrack(m, o) {
+    if (!m.q('#tk_carrier') || m.q('#tk_carrier').disabled) return;
+    o.track = o.track || { history: [], containers: [] };
+    const t = o.track, cr = m.q('#tk_carrier').value;
+    t.vessel = m.q('#tk_vessel').value.trim(); t.voyage = m.q('#tk_voyage').value.trim(); t.vesselEta = m.q('#tk_eta').value;
+    const st = m.q('#tk_status').value.trim(); if (st !== (t.trackStatus || '')) { t.trackStatus = st; t.trackStatusAt = m.q('#tk_at').value || today(); } else t.trackStatusAt = m.q('#tk_at').value || t.trackStatusAt || '';
+    if (cr !== (t.carrier || '')) {
+      t.carrier = cr;
+      if (cr) { // تعلّم البادئات غير المعروفة ← تنطبق على باقي الأوامر
+        db.carrierMap = db.carrierMap || {};
+        const px = E.prefixesOf(o), known = k => E.CARRIERS.some(c => c.cont.includes(k)), knownB = k => E.CARRIERS.some(c => c.bl.includes(k));
+        px.cont.filter(k => !known(k)).forEach(k => { db.carrierMap['C:' + k] = cr; });
+        if (px.bl && !knownB(px.bl)) db.carrierMap['B:' + px.bl] = cr;
+        log(`الخط الناقل للأمر ${o.no}: ${cr} (يتعلّم البادئات: ${px.cont.concat(px.bl ? [px.bl] : []).join('، ')})`);
+      }
+    }
+  }
   // جدول الخطة: كل مرحلة كم يوم من تاريخ الأمر (تراكمي)، المخطط والفعلي والمتوقع والفرق
   function planTableHtml(o) {
     const p = E.poPlan(db, o, today());
@@ -1904,6 +1970,7 @@
       <div class="small">مدة «تجهيز البضاعة» و«في الطريق» تاخذ من كارت الصنف ثم نوع الصنف ثم إعدادات المراحل (أكبر قيمة بين أصناف الأمر). أي تاريخ فعلي يزيح المراحل اللي بعده.</div></details>`;
   }
   function bindTrackSection(m, o, save, reopenModal) {
+    m.q('.modal-body').addEventListener('click', e => { const b = e.target.closest('[data-trackurl]'); if (b) { e.preventDefault(); api.openTrack(b.dataset.trackurl).then(okk => { if (!okk) toast('ما قدرت أفتح الرابط', 'bad'); }); } });
     if (!can('shipping')) return;
     const saveTrack = () => {
       o.track = o.track || { history: [], containers: [] };
@@ -2225,6 +2292,7 @@
       ${db.currencies.map((c, i) => `<tr><td><input class="inp" style="width:80px" data-chg="cur" data-i="${i}" data-k="code" value="${esc(c.code)}"></td><td><input class="inp" style="width:120px" data-chg="cur" data-i="${i}" data-k="name" value="${esc(c.name)}"></td><td><input class="inp" style="width:100px" type="number" step="any" min="0" data-chg="cur" data-i="${i}" data-k="rate" value="${c.rate}"></td><td>${i ? `<button class="sm danger" data-act="delCur" data-i="${i}">حذف</button>` : '<span class="small">الأساسية</span>'}</td></tr>`).join('')}
       </tbody></table><button class="sm" data-act="addCur" style="margin-top:8px">+ إضافة عملة</button>
       <div class="form f4" style="margin-top:12px"><label class="f">أفق الكاش المطلوب (يوم)<input class="inp" type="number" step="1" min="1" data-chg="set" data-k="cashHorizonDays" value="${esc(s.cashHorizonDays)}"></label>
+        <label class="f">تنبيه تأخر الشحنة بعد (يوم) من الوصول المتوقع<input class="inp" type="number" step="1" min="0" data-chg="set" data-k="shipLateDays" value="${esc(s.shipLateDays || 7)}"></label>
         <label class="f">مدة الشحن حتى الوصول (يوم) — الوصول المتوقع = الشحن الفعلي + هذي المدة<input class="inp" type="number" step="1" min="1" data-chg="set" data-k="shipTransitDays" value="${esc(s.shipTransitDays || 30)}"></label>
         <label class="f">نوع أوامر الشراء<select class="inp" data-chg="setBool" data-k="allPoForeign"><option value="1" ${s.allPoForeign !== false ? 'selected' : ''}>كلها استيراد خارجي (بالدولار ومراحل الشحن)</option><option value="0" ${s.allPoForeign === false ? 'selected' : ''}>فيها محلي (حسب نوع الصنف وCO)</option></select></label>
         <label class="f" style="grid-column:span 2">خصم أوامر الشراء المفتوحة من الطلب كبضاعة بالطريق<select class="inp" data-chg="setBool" data-k="poAsTransit"><option value="0" ${!s.poAsTransit ? 'selected' : ''}>مقفل — أوامر الشراء للمتابعة والكاش فقط، والطلب يعتمد على البضاعة بالطريق اليدوية</option><option value="1" ${s.poAsTransit ? 'selected' : ''}>مفعّل — الكمية المتبقية في الأوامر المفتوحة تنخصم من الطلب تلقائيًا</option></select></label></div>
@@ -2788,6 +2856,7 @@
     partyMap: el => statusMapModal(+el.dataset.i),
     poBulkImport: () => bulkImportFiles(),
     importVouchers: () => importVouchers(),
+    openTrack: el => { const u = E.trackUrl(db.po.orders[el.dataset.k], '', db); if (u) api.openTrack(u); },
     tplTrack: () => trackTemplateDialog(),
     cformAdd: el => { db.clearerForm[el.dataset.l].push({ text: 'حالة جديدة', stage: '__none' }); commit(); },
     cformDel: el => { db.clearerForm[el.dataset.l].splice(+el.dataset.i, 1); commit(); },

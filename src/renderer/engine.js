@@ -572,11 +572,51 @@
     };
   }
   // الوصول المتوقع: الخارجي من الخطة التراكمية، والمحلي من تاريخ الأمر + فترة التوصيل
+  // ---------- الخط الناقل وتتبع الشحنة ----------
+  // بادئة الحاوية (أول 4 حروف) أو بادئة البوليصة ← الخط الناقل + رابط صفحة التتبع ({n} = رقم الحاوية أو البوليصة)
+  const CARRIERS = [
+    { id: 'CMA', name: 'CMA CGM', cont: ['ECMU', 'CMAU', 'APZU', 'APHU', 'CGMU', 'APLU'], bl: ['CMDU', 'CMAU', 'APLU'], url: 'https://www.cma-cgm.com/ebusiness/tracking/search?SearchBy=Container&Reference={n}' },
+    { id: 'MAERSK', name: 'Maersk', cont: ['MSKU', 'MRKU', 'MAEU', 'MRSU', 'MCRU', 'SEAU', 'SUDU'], bl: ['MAEU', 'MSKU', 'SEAU', 'SUDU'], url: 'https://www.maersk.com/tracking/{n}' },
+    { id: 'MSC', name: 'MSC', cont: ['MSCU', 'MEDU', 'MSDU', 'MSMU', 'MSNU'], bl: ['MEDU', 'MSCU'], url: 'https://www.msc.com/en/track-a-shipment?trackingNumber={n}' },
+    { id: 'HAPAG', name: 'Hapag-Lloyd', cont: ['HLCU', 'HLXU', 'HLBU', 'UACU', 'UASU'], bl: ['HLCU'], url: 'https://www.hapag-lloyd.com/en/online-business/track/track-by-container-solution.html?container={n}' },
+    { id: 'COSCO', name: 'COSCO', cont: ['COSU', 'CSNU', 'CBHU', 'CCLU', 'CSLU', 'FCIU'], bl: ['COSU', 'COAU'], url: 'https://elines.coscoshipping.com/ebusiness/cargoTracking?trackingType=CONTAINER&number={n}' },
+    { id: 'OOCL', name: 'OOCL', cont: ['OOLU', 'OOCU'], bl: ['OOLU'], url: 'https://www.oocl.com/eng/ourservices/eservices/cargotracking/Pages/cargotracking.aspx?ref={n}' },
+    { id: 'ONE', name: 'ONE', cont: ['ONEU', 'NYKU', 'MOLU', 'KKFU'], bl: ['ONEY'], url: 'https://ecomm.one-line.com/one-ecom/manage-shipment/cargo-tracking?trakNoParam={n}' },
+    { id: 'EVERGREEN', name: 'Evergreen', cont: ['EGHU', 'EMCU', 'EISU', 'EITU', 'EGSU'], bl: ['EGLV'], url: 'https://ct.shipmentlink.com/servlet/TDB1_CargoTracking.do?SEARCH_TYPE=CNTR&NO={n}' },
+    { id: 'YANGMING', name: 'Yang Ming', cont: ['YMLU', 'YMMU'], bl: ['YMLU', 'YMJA'], url: 'https://www.yangming.com/e-service/track_trace/track_trace_cargo_tracking.aspx?str={n}' },
+    { id: 'ZIM', name: 'ZIM', cont: ['ZIMU', 'ZCSU'], bl: ['ZIMU'], url: 'https://www.zim.com/tools/track-a-shipment?consnumber={n}' },
+    { id: 'HMM', name: 'HMM', cont: ['HDMU', 'HMMU'], bl: ['HDMU'], url: 'https://www.hmm21.com/e-service/general/trackNTrace/TrackNTrace.do?numbers={n}' },
+    { id: 'PIL', name: 'PIL', cont: ['PCIU'], bl: ['PCIU'], url: 'https://www.pilship.com/en--/120.html?search_type=container&refNo={n}' },
+    { id: 'TSL', name: 'TS Lines', cont: ['TSLU'], bl: ['TSLT'], url: 'https://www.tslines.com/en/tracking?no={n}' },
+    { id: 'CUL', name: 'China United Lines', cont: ['CULU'], bl: ['CULV'], url: 'https://www.culines.com/en/site/bill?bill={n}' },
+    { id: 'KMTC', name: 'KMTC', cont: ['KMTU'], bl: ['KMTC'], url: 'https://www.ekmtc.com/index.html#/cargo-tracking?searchNumber={n}' },
+    { id: 'SINOKOR', name: 'Sinokor', cont: ['SKLU', 'SKHU'], bl: ['SNKO'], url: 'https://ebiz.sinokor.co.kr/Tracking?blno={n}' },
+    { id: 'ZHONGGU', name: 'Zhonggu (ZGL)', cont: ['ZGXU', 'ZGLU'], bl: ['ZGST'], url: 'https://www.track-trace.com/container?number={n}' },
+    { id: 'WANHAI', name: 'Wan Hai', cont: ['WHLU', 'WHSU'], bl: ['WHLC'], url: 'https://www.wanhai.com/views/cargoTrack/CargoTrack.xhtml?no={n}' }
+  ];
+  const genericTrack = 'https://www.track-trace.com/container?number={n}';
+  // الخط الناقل للأمر: يدوي، وإلا من بادئة أول حاوية، وإلا من بادئة البوليصة
+  // db.carrierMap = بادئات تعلّمها البرنامج من اختيارك اليدوي ({ 'C:TSSU': 'MSC', 'B:8006': 'MSC' })
+  const carrierById = id => CARRIERS.find(c => c.id === id) || { id, name: id, url: genericTrack };
+  const prefixesOf = o => ({ cont: [...new Set(((o.track || {}).containers || []).map(c => String(c.no || '').replace(/\s+/g, '').slice(0, 4).toUpperCase()).filter(Boolean))], bl: String(o.blNo || '').replace(/\s+/g, '').toUpperCase().slice(0, 4) });
+  function carrierOf(o, db) {
+    const t = o.track || {}, map = (db && db.carrierMap) || {}, px = prefixesOf(o);
+    if (t.carrier) return carrierById(t.carrier);
+    for (const k of px.cont) { const c = CARRIERS.find(x => x.cont.includes(k)); if (c) return c; }
+    for (const k of px.cont) if (map['C:' + k]) return carrierById(map['C:' + k]);
+    const b = CARRIERS.find(x => x.bl.includes(px.bl)); if (b) return b;
+    if (px.bl && map['B:' + px.bl]) return carrierById(map['B:' + px.bl]);
+    return null;
+  }
+  function trackUrl(o, contNo, db) {
+    const c = carrierOf(o, db), n = contNo || ((o.track || {}).containers || [])[0] && o.track.containers[0].no || o.blNo || '';
+    return n ? (c ? c.url : genericTrack).replace('{n}', encodeURIComponent(String(n).replace(/\s+/g, ''))) : '';
+  }
   // الوصول المتوقع (عليه يتحسب الكاش): وصول المنفذ من شيت المخلّص، أو تاريخ الشحن الفعلي (من البوليصة — المحاسب) + مدة الشحن — أيهما أقرب.
   // ما فيه شحن فعلي ← تاريخ تعميد الشحن + مدة الشحن. ما فيه ولا واحد ← الخطة من تاريخ الأمر.
   function arrivalEta(db, o) {
     const T = num((db.settings || {}).shipTransitDays) || 30, t = o.track || {};
-    const c = [t.portAt, t.portEta, o.shipDate ? addDaysDate(o.shipDate, T) : ''].filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d || ''));
+    const c = [t.portAt, t.portEta, t.vesselEta, o.shipDate ? addDaysDate(o.shipDate, T) : ''].filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d || ''));
     if (!c.length && o.shipAwardDate) c.push(addDaysDate(o.shipAwardDate, T));
     return c.length ? c.sort()[0] : '';
   }
@@ -716,7 +756,7 @@
   }
 
   const Engine = {
-    compute, openPoLines, poSummary, defaultShipStages, trackStageIndex, setTrackStage, trackSummary, poAutoEta, poPrepDays, poExpectedShip, addDaysDate, stageOf, STAGE_LABEL, poPlan, stageDur, isForeign, MAIN_STATUSES, mainStatusOf, dayDiff, poLead, addMonthsDate, fxRate, normsinv, normUnit, normCode, num, toMonth, monthAdd, monthLabel,
+    CARRIERS, carrierOf, trackUrl, prefixesOf, compute, openPoLines, poSummary, defaultShipStages, trackStageIndex, setTrackStage, trackSummary, poAutoEta, poPrepDays, poExpectedShip, addDaysDate, stageOf, STAGE_LABEL, poPlan, stageDur, isForeign, MAIN_STATUSES, mainStatusOf, dayDiff, poLead, addMonthsDate, fxRate, normsinv, normUnit, normCode, num, toMonth, monthAdd, monthLabel,
     unitFactor, purchaseFactor, allUnits, emptyDb, defaultSettings, defaultClasses, abc, roundUp, exceptionApplies
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Engine;
