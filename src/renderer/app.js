@@ -557,7 +557,8 @@
     data: { pdf: true, excel: true, tables: () => [[{ sales: 'salesMat', stock: 'stockT', transit: 'transitT', units: 'unitsT' }[ui.dataTab], { sales: 'المبيعات', stock: 'المخزون', transit: 'بالطريق', units: 'وحدات غير معرفة' }[ui.dataTab]]], title: () => ({ sales: 'المبيعات', stock: 'المخزون', transit: 'بالطريق', units: 'وحدات غير معرفة' }[ui.dataTab]) },
     archive: { pdf: true, excel: true, tables: [['arch', 'الأرشيف']], title: () => 'أرشيف الطلبات' },
     po: { pdf: true, excel: true, tables: () => ui.poTab === 'cash' ? [['cashBuckets', 'الكاش حسب الشهر'], ['cashList', 'الكاش المطلوب']] : ui.poTab === 'imports' ? [['poImports', 'سجل الاستيراد']] : [['poList', 'أوامر الشراء']], title: () => ui.poTab === 'cash' ? 'الكاش المطلوب ' + today() : 'أوامر الشراء ' + today() },
-    users: { pdf: true, excel: true, tables: [['users', 'المستخدمين']], title: () => 'المستخدمين' }
+    users: { pdf: true, excel: true, tables: [['users', 'المستخدمين']], title: () => 'المستخدمين' },
+    settings: { pdf: true, excel: true, custom: () => exportSpec(masterDataSpec(), 'البيانات-الأساسية-' + today()), title: () => 'البيانات الأساسية' }
   };
   function cellExport(c, r, i) {
     if (c.k === 'idx' || c.k === 'i' && !('i' in r)) return i + 1;
@@ -1378,7 +1379,7 @@
   // مراحل المخلّص للاستعراض فقط — مخفية إلا إذا ضغطت «إظهار مراحل المخلّص» (ينحفظ على الجهاز)
   const showStages = () => { try { return localStorage.getItem('pp_show_stages') === '1'; } catch (e) { return false; } };
   const mfGroups = () => MF_GROUPS;
-  const MF_GROUPS = [['main', 'الحالة'], ['stage', 'مراحل المخلّص'], ['fw', 'CO'], ['cl', 'المخلّص'], ['sup', 'المورد'], ['wh', 'المخزن'], ['pay', 'السداد'], ['cur', 'العملة'], ['shipc', 'قيمة الشحن'], ['pod', 'تاريخ الأمر'], ['bl', 'رقم البوليصة'], ['term', 'نقد / أجل'], ['alert', 'تنبيهات']];
+  const MF_GROUPS = [['main', 'الحالة'], ['stage', 'مراحل المخلّص'], ['fw', 'CO'], ['cl', 'المخلّص'], ['sup', 'المورد'], ['wh', 'المخزن'], ['pay', 'السداد'], ['cur', 'العملة'], ['shipc', 'قيمة الشحن'], ['pod', 'تاريخ الأمر'], ['bl', 'رقم البوليصة'], ['term', 'نقد / أجل'], ['car', 'الخط الناقل'], ['alert', 'تنبيهات']];
   const mfState = () => { const f = ui.f.m || (ui.f.m = { main: ['بانتظار الاعتماد', 'صادر', 'مشحون — بدون أوراق', 'مشحون — استلمنا الأوراق'], stage: [], fw: [], cl: [], sup: [], pay: [], cur: [], alert: [], q: '' }); MF_GROUPS.forEach(([g]) => { if (!Array.isArray(f[g])) f[g] = []; }); return f; };
   // كل الأوامر بكل المعلومات (السداد + المتابعة + الخطة) في سطر واحد
   function masterAll() { return memo('master', masterAllRaw); }
@@ -1405,7 +1406,7 @@
   const whName = c => { const w = (db.warehouses || []).find(x => x.code === String(c).trim()); return w && w.name ? `${w.name} (${w.code})` : String(c).trim(); };
   const whLabel = v => String(v || '').split('، ').filter(Boolean).map(whName).join('، ');
   const termLabel = o => o.payTerm === 'credit' ? 'أجل ' + fmt(o.payDays) + ' يوم' : 'نقد';
-  const mfValue = (g, o) => g === 'term' ? [o.payTerm === 'credit' ? 'أجل' : 'نقد'] : g === 'main' ? [o.mainStatus] : g === 'stage' ? [o.stageName || '— محلي (بدون مراحل) —'] : g === 'fw' ? [o.forwarder || '— بدون —'] : g === 'cl' ? [o.clearer || '— بدون —'] :
+  const mfValue = (g, o) => g === 'car' ? [(E.carrierOf(db.po.orders[o.no], db) || {}).name || '— غير معروف —'] : g === 'term' ? [o.payTerm === 'credit' ? 'أجل' : 'نقد'] : g === 'main' ? [o.mainStatus] : g === 'stage' ? [o.stageName || '— محلي (بدون مراحل) —'] : g === 'fw' ? [o.forwarder || '— بدون —'] : g === 'cl' ? [o.clearer || '— بدون —'] :
     g === 'sup' ? [o.supplier || '— بدون —'] : g === 'cc' ? [o.costCenter || '— بدون —'] : g === 'wh' ? (o.warehouse ? o.warehouse.split('، ').map(whName) : ['— بدون —']) : g === 'pay' ? [o.payStatus] : g === 'cur' ? [curName(o.currency)] : g === 'shipc' ? [num(o.shipping) > 0 ? 'الشحن مسجّل' : 'الشحن فارغ'] : g === 'pod' ? [o.poDate ? 'تاريخ الأمر موجود' : 'تاريخ الأمر فارغ'] : g === 'bl' ? [String(o.blNo || '').trim() ? 'البوليصة موجودة' : 'البوليصة فارغة'] : g === 'alert' ? o.alerts : [];
   // شجرة الحالة: الحالات الرئيسية، وتحت كل وحدة مراحل المخلّص اللي تخصها (قبل الشحن / من الشحن لين المستودع / بعد الوصول)
   function stageGroups() {
@@ -2329,7 +2330,50 @@
   };
 
   // ---------- الإعدادات ----------
+  // ---------- البيانات الأساسية من الإعدادات (تصدير Excel / PDF) ----------
+  function masterDataSpec() {
+    const s = db.settings, co = db.settings.companyName ? ' — ' + db.settings.companyName : '';
+    const sh = (name, columns, rows) => ({ name, title: name + co, subtitle: 'تاريخ التصدير ' + today(), columns: columns.map(([key, header, width, fmt]) => ({ key, header, width: width || 16, fmt })), rows });
+    const yes = v => v ? 'نعم' : '';
+    const scopeL = { all: 'كل الأصناف', type: 'نوع', group: 'مجموعة', mainItem: 'صنف رئيسي', item: 'أصناف محددة' };
+    const supCount = new Map(); for (const o of Object.values(db.po.orders)) { const k = String(o.supplier || '').trim(); if (k) { const g = supCount.get(k) || { all: 0, open: 0 }; g.all++; if (o.status === 'open') g.open++; supCount.set(k, g); } }
+    Object.keys(db.supplierTerms || {}).forEach(k => { if (!supCount.has(k)) supCount.set(k, { all: 0, open: 0 }); });
+    const carCnt = new Map(); for (const o of Object.values(db.po.orders)) { if (o.status !== 'open') continue; const c = E.carrierOf(o, db); if (c) carCnt.set(c.id, (carCnt.get(c.id) || 0) + 1); }
+    const G = [
+      ['lastMonth', 'آخر شهر مبيعات'], ['stockDate', 'تاريخ المخزون'], ['reviewPeriod', 'فترة المراجعة (شهر)'], ['nMonths', 'أشهر المتوسط'], ['thrA', 'حد التصنيف A'], ['thrB', 'حد التصنيف B'],
+      ['cashHorizonDays', 'أفق الكاش (يوم)'], ['shipTransitDays', 'مدة الشحن حتى الوصول (يوم)'], ['shipLateDays', 'تنبيه تأخر الشحنة (يوم)'], ['defaultFreeDays', 'أيام السماح الافتراضية'], ['demurrageWarnDays', 'تنبيه قبل نهاية السماح (يوم)'],
+      ['freshDays', 'المدخلات تعتبر قديمة بعد (يوم)'], ['defaultType', 'النوع الافتراضي'], ['defaultLead', 'فترة التوصيل الافتراضية'], ['keepMonths', 'أشهر الاحتفاظ'], ['currency', 'العملة الأساسية'], ['companyName', 'اسم الشركة']
+    ];
+    return { sheets: [
+      sh('المعاملات العامة', [['k', 'البند', 34], ['v', 'القيمة', 22]], G.map(([k, l]) => ({ k: l, v: s[k] == null ? '' : typeof s[k] === 'boolean' ? (s[k] ? 'نعم' : 'لا') : s[k] }))
+        .concat([{ k: 'كل الأوامر خارجية', v: s.allPoForeign === false ? 'لا' : 'نعم' }, { k: 'خصم أوامر الشراء كبضاعة بالطريق', v: s.poAsTransit ? 'نعم' : 'لا' }])),
+      sh('أنواع الأصناف', [['name', 'النوع'], ['leadTime', 'فترة التوصيل (شهر)', 14, '#,##0.##'], ['extraMonths', 'أشهر إضافية', 12, '#,##0.##'], ['currency', 'عملة الشراء', 12], ['prepDays', 'مدة التجهيز (يوم)', 14], ['shipDays', 'مدة الشحن (يوم)', 14], ['note', 'ملاحظة', 24], ['items', 'أصناف', 10, '#,##0']],
+        db.types.map(t => ({ name: t.name, leadTime: num(t.leadTime), extraMonths: num(t.extraMonths), currency: curName(t.currency), prepDays: t.prepDays == null ? '' : t.prepDays, shipDays: t.shipDays == null ? '' : t.shipDays, note: t.note || '', items: db.items.filter(x => x.type === t.name).length }))),
+      sh('التصنيف ومستوى الخدمة', [['code', 'التصنيف', 10], ['service', 'مستوى الخدمة %', 14, '0.00'], ['z', 'Z', 10, '0.0000'], ['items', 'أصناف', 10, '#,##0']],
+        db.classes.map(c => ({ code: c.code, service: +(c.service * 100).toFixed(4), z: +E.normsinv(c.service).toFixed(4), items: res.rows.filter(r => r.cls === c.code).length }))),
+      sh('المخازن', [['code', 'رقم المخزن', 12], ['name', 'اسم المخزن', 26]], (db.warehouses || []).map(w => ({ code: w.code, name: w.name || '' }))),
+      sh('العملات', [['code', 'الرمز', 10], ['name', 'الاسم', 16], ['rate', 'سعر الصرف', 12, '0.0000']], db.currencies.map(c => ({ code: c.code, name: c.name, rate: num(c.rate) }))),
+      sh('شروط الدفع للموردين', [['s', 'المورد', 34], ['kind', 'نقد / أجل', 12], ['days', 'أيام الأجل', 12], ['open', 'أوامر مفتوحة', 12, '#,##0'], ['all', 'كل الأوامر', 12, '#,##0']],
+        [...supCount].sort((a, b) => b[1].open - a[1].open || a[0].localeCompare(b[0])).map(([k, g]) => { const t = (db.supplierTerms || {})[k] || {}; return { s: k, kind: t.kind === 'credit' ? 'أجل' : 'نقد', days: t.kind === 'credit' ? num(t.days) : '', open: g.open, all: g.all }; })),
+      sh('الخطوط الناقلة', [['name', 'الناقل', 22], ['cont', 'بادئات الحاوية', 26], ['bl', 'بادئات البوليصة', 20], ['url', 'رابط التتبع', 60], ['open', 'أوامر مفتوحة', 12, '#,##0'], ['auto', 'جديد (تلقائي)', 12]],
+        E.carrierList(db).map(c => ({ name: c.name, cont: (c.cont || []).join(', '), bl: (c.bl || []).join(', '), url: c.url || '', open: carCnt.get(c.id) || 0, auto: yes(c.auto) }))),
+      sh('CO والمخلصين', [['kind', 'النوع', 10], ['name', 'الاسم', 28], ['contact', 'المسؤول', 18], ['phone', 'الجوال', 16], ['email', 'البريد', 26], ['freeDays', 'أيام السماح', 12]],
+        (db.parties || []).map(p => ({ kind: p.kind === 'clearer' ? 'مخلّص' : 'CO', name: p.name, contact: p.contact || '', phone: p.phone || '', email: p.email || '', freeDays: p.freeDays == null ? '' : p.freeDays }))),
+      sh('مراحل المعاملات', [['i', '#', 6], ['name', 'المرحلة', 40], ['party', 'الجهة', 16], ['days', 'المدة (يوم)', 12], ['marks', 'الأثر', 16]],
+        (db.shipStages || []).map((x, i) => ({ i: i + 1, name: x.name, party: x.party || '', days: x.days == null ? '' : x.days, marks: { shipped: 'تم الشحن', docs: 'استلام الأوراق', port: 'وصول الميناء', received: 'وصل المستودع', final: 'نهاية المعاملة' }[x.marks] || '' }))),
+      sh('الفترات الاستثنائية', [['enabled', 'مفعّلة', 8], ['name', 'الاسم', 20], ['fromMonth', 'من شهر', 12], ['toMonth', 'إلى شهر', 12], ['scope', 'النطاق', 14], ['value', 'القيمة', 24], ['months', 'أشهر إضافية', 12]],
+        (db.exceptions || []).map(x => ({ enabled: yes(x.enabled), name: x.name || '', fromMonth: x.fromMonth || '', toMonth: x.toMonth || '', scope: scopeL[x.scope] || x.scope || '', value: x.value || '', months: num(x.months) }))),
+      sh('المجموعات الرئيسية', [['g', 'المجموعة', 30], ['items', 'أصناف', 10, '#,##0']], (db.groups || []).map(g => ({ g, items: db.items.filter(x => x.group === g).length })))
+    ] };
+  }
+  // نسخة الطباعة / PDF: جداول للقراءة بدل خانات التعديل
+  function specHtml(spec, title) {
+    const cell = (c, v) => v == null || v === '' ? '' : typeof v === 'number' ? fmt(v, c.fmt && /\./.test(c.fmt) ? 2 : 0) : esc(v);
+    return `<div class="page-head"><div><h1>${esc(title)}</h1><div class="sub">${esc(db.settings.companyName || '')} — ${esc(today())}</div></div></div>` +
+      spec.sheets.filter(s => s.rows.length).map(s => `<div class="card" style="break-inside:avoid-page"><h2>${esc(s.name)}</h2><table class="t"><thead><tr>${s.columns.map(c => `<th>${esc(c.header)}</th>`).join('')}</tr></thead><tbody>${s.rows.map(r => `<tr>${s.columns.map(c => `<td class="${typeof r[c.key] === 'number' ? 'n' : ''}" style="${c.key === 'url' ? 'direction:ltr;word-break:break-all;font-size:11px' : ''}">${cell(c, r[c.key])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`).join('');
+  }
   PAGES.settings = function () {
+    if (ui.printing) return specHtml(masterDataSpec(), 'البيانات الأساسية');
     const s = db.settings;
     const inp = (k, type = 'number', extra = '') => `<input class="inp" type="${type}" ${type === 'number' ? 'step="any"' : ''} data-chg="set" data-k="${k}" value="${esc(s[k])}" ${extra}>`;
     const om = res.orderMonth;
