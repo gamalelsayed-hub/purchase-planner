@@ -450,4 +450,27 @@ assert.strictEqual(db.po.orders.K1.track.stage, 'emptyReturned'); assert.ok(db.p
   assert.deepStrictEqual(d12.po.orders.C2.track.containers.map(c => c.no), ['MSKU1234567', 'MSKU7654321']);
 }
 
+// نقد / أجل: الاستحقاق
+{
+  const d13 = E.emptyDb(); d13.settings.shipTransitDays = 30;
+  d13.supplierTerms = { 'مورد أ': { kind: 'credit', days: 60 } };
+  const mk = (no, x) => { d13.po.orders[no] = Object.assign({ no, status: 'open', currency: 'USD', supplier: 'مورد أ', poDate: '2026-09-01', lines: [], payments: [], manualValue: 1000 }, x); };
+  mk('T1', { invoiceDate: '2026-10-01', shipDate: '2026-10-05' });
+  mk('T2', { shipDate: '2026-10-05' });
+  mk('T3', { shipAwardDate: '2026-11-01' });
+  mk('T4', { shipDate: '2026-10-05', payTerm: 'cash' });
+  mk('T5', { supplier: 'مورد ب', shipDate: '2026-10-05' });
+  mk('T6', { shipDate: '2026-10-05', payTerm: 'credit', payDays: 90 });
+  const S = Object.fromEntries(E.poSummary(d13, '2026-11-24').map(o => [o.no, o]));
+  assert.strictEqual(S.T1.dueDate, '2026-11-30'); assert.strictEqual(S.T1.dueBase, 'تاريخ الفاتورة');
+  assert.strictEqual(S.T2.dueDate, '2026-12-04'); assert.strictEqual(S.T2.dueBase, 'تاريخ الشحن');
+  assert.strictEqual(S.T3.dueDate, '2026-12-31');
+  assert.strictEqual(S.T4.payTerm, 'cash'); assert.strictEqual(S.T4.dueDate, S.T4.eta); assert.strictEqual(S.T4.dueDate, '2026-11-04');
+  assert.strictEqual(S.T5.payTerm, 'cash'); assert.strictEqual(S.T5.payTermSrc, 'افتراضي');
+  assert.strictEqual(S.T6.payDays, 90); assert.strictEqual(S.T6.dueDate, '2027-01-03');
+  const rows = [['رقم الأمر', 'تاريخ الفاتورة'], ['T2', '15/10/2026']];
+  const dh = I.detectHeader(rows, 'docs'); I.applyDocs(d13, I.rowsToRecords(rows, dh.row, dh.map, 'poNo'), { date: '2026-11-24' });
+  assert.strictEqual(d13.po.orders.T2.invoiceDate, '2026-10-15');
+}
+
 console.log('✓ all engine unit tests passed');

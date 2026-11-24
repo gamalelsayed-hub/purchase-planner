@@ -1377,7 +1377,7 @@
   // مراحل المخلّص للاستعراض فقط — مخفية إلا إذا ضغطت «إظهار مراحل المخلّص» (ينحفظ على الجهاز)
   const showStages = () => { try { return localStorage.getItem('pp_show_stages') === '1'; } catch (e) { return false; } };
   const mfGroups = () => MF_GROUPS;
-  const MF_GROUPS = [['main', 'الحالة'], ['stage', 'مراحل المخلّص'], ['fw', 'CO'], ['cl', 'المخلّص'], ['sup', 'المورد'], ['wh', 'المخزن'], ['pay', 'السداد'], ['cur', 'العملة'], ['shipc', 'قيمة الشحن'], ['pod', 'تاريخ الأمر'], ['bl', 'رقم البوليصة'], ['alert', 'تنبيهات']];
+  const MF_GROUPS = [['main', 'الحالة'], ['stage', 'مراحل المخلّص'], ['fw', 'CO'], ['cl', 'المخلّص'], ['sup', 'المورد'], ['wh', 'المخزن'], ['pay', 'السداد'], ['cur', 'العملة'], ['shipc', 'قيمة الشحن'], ['pod', 'تاريخ الأمر'], ['bl', 'رقم البوليصة'], ['term', 'نقد / أجل'], ['alert', 'تنبيهات']];
   const mfState = () => { const f = ui.f.m || (ui.f.m = { main: ['بانتظار الاعتماد', 'صادر', 'مشحون — بدون أوراق', 'مشحون — استلمنا الأوراق'], stage: [], fw: [], cl: [], sup: [], pay: [], cur: [], alert: [], q: '' }); MF_GROUPS.forEach(([g]) => { if (!Array.isArray(f[g])) f[g] = []; }); return f; };
   // كل الأوامر بكل المعلومات (السداد + المتابعة + الخطة) في سطر واحد
   function masterAll() { return memo('master', masterAllRaw); }
@@ -1403,7 +1403,8 @@
   }
   const whName = c => { const w = (db.warehouses || []).find(x => x.code === String(c).trim()); return w && w.name ? `${w.name} (${w.code})` : String(c).trim(); };
   const whLabel = v => String(v || '').split('، ').filter(Boolean).map(whName).join('، ');
-  const mfValue = (g, o) => g === 'main' ? [o.mainStatus] : g === 'stage' ? [o.stageName || '— محلي (بدون مراحل) —'] : g === 'fw' ? [o.forwarder || '— بدون —'] : g === 'cl' ? [o.clearer || '— بدون —'] :
+  const termLabel = o => o.payTerm === 'credit' ? 'أجل ' + fmt(o.payDays) + ' يوم' : 'نقد';
+  const mfValue = (g, o) => g === 'term' ? [o.payTerm === 'credit' ? 'أجل' : 'نقد'] : g === 'main' ? [o.mainStatus] : g === 'stage' ? [o.stageName || '— محلي (بدون مراحل) —'] : g === 'fw' ? [o.forwarder || '— بدون —'] : g === 'cl' ? [o.clearer || '— بدون —'] :
     g === 'sup' ? [o.supplier || '— بدون —'] : g === 'cc' ? [o.costCenter || '— بدون —'] : g === 'wh' ? (o.warehouse ? o.warehouse.split('، ').map(whName) : ['— بدون —']) : g === 'pay' ? [o.payStatus] : g === 'cur' ? [curName(o.currency)] : g === 'shipc' ? [num(o.shipping) > 0 ? 'الشحن مسجّل' : 'الشحن فارغ'] : g === 'pod' ? [o.poDate ? 'تاريخ الأمر موجود' : 'تاريخ الأمر فارغ'] : g === 'bl' ? [String(o.blNo || '').trim() ? 'البوليصة موجودة' : 'البوليصة فارغة'] : g === 'alert' ? o.alerts : [];
   // شجرة الحالة: الحالات الرئيسية، وتحت كل وحدة مراحل المخلّص اللي تخصها (قبل الشحن / من الشحن لين المستودع / بعد الوصول)
   function stageGroups() {
@@ -1484,6 +1485,9 @@
     { k: 'expShip', h: 'الشحن المخطط', f: o => o.expShip ? `${esc(o.expShip)}${o.shipLate ? ` <span class="pill bad">تأخر ${o.shipLateDays} يوم</span>` : ''}` : '' },
     { k: 'shipAwardDate', h: 'تاريخ تعميد الشحن', def: true }, { k: 'shipDate', h: 'تاريخ الشحن الفعلي', def: true }, { k: 'portEta', h: 'وصول المنفذ (المخلّص)' },
     { k: 'eta', h: 'الوصول المتوقع', def: true, f: etaCell }, { k: 'planEta', h: 'الوصول المخطط' },
+    { k: 'payTerm', h: 'نقد / أجل', def: true, v: termLabel, f: o => `<span class="pill ${o.payTerm === 'credit' ? 'brand' : ''}" title="المصدر: ${esc(o.payTermSrc)}">${esc(termLabel(o))}</span>` },
+    { k: 'invoiceDate', h: 'تاريخ الفاتورة' },
+    { k: 'dueDate', h: 'تاريخ الاستحقاق', def: true, f: dueCell },
     { k: 'variance', h: 'الفرق عن الخطة (يوم)', def: true, n: true, f: o => o.variance == null ? '' : o.variance > 0 ? `<b style="color:var(--bad)">+${fmt(o.variance)}</b>` : o.variance < 0 ? `<span style="color:var(--ok)">${fmt(o.variance)}</span>` : '0' },
     { k: 'currency', h: 'العملة', def: true, v: o => curName(o.currency) },
     { k: 'value', h: 'القيمة', n: true, d: 2 }, { k: 'shipping', h: 'الشحن', n: true, d: 2 }, { k: 'extrasSar', h: 'تكاليف إضافية ' + cur(), n: true },
@@ -1495,6 +1499,8 @@
   ];
   function masterColsVisible() {
     let saved = null; try { saved = JSON.parse(localStorage.getItem('pp_po_cols') || 'null'); } catch (e) { /* */ }
+    // أعمدة جديدة افتراضية تنضاف مرة وحدة لمن عنده اختيار محفوظ قديم
+    try { if (saved && !localStorage.getItem('pp_po_cols_terms')) { ['payTerm', 'dueDate'].forEach(k => { if (!saved.includes(k)) saved.push(k); }); localStorage.setItem('pp_po_cols', JSON.stringify(saved)); localStorage.setItem('pp_po_cols_terms', '1'); } } catch (e) { /* */ }
     return MASTER_COLS().filter(c => (c.k !== 'stageIdx' || showStages()) && (c.fixed || (saved ? saved.includes(c.k) : c.def)));
   }
   const mainPill = o => {
@@ -1505,11 +1511,12 @@
   const stagePill = o => mainPill(o);
   const payPill = s => `<span class="pill ${s === 'مسدد' ? 'ok' : s === 'مسدد جزئيًا' ? 'warn' : s === 'غير مسدد' ? 'bad' : ''}">${s}</span>`;
   const etaCell = o => !o.eta ? '<span class="muted">—</span>' : `${esc(o.eta)}${o.etaManual ? ' ✎' : ''}${o.status === 'open' && o.daysToEta != null ? ` <span class="pill ${o.daysToEta < 0 ? 'bad' : o.daysToEta <= 30 ? 'warn' : ''}">${o.daysToEta < 0 ? 'متأخر ' + (-o.daysToEta) + ' يوم' : 'بعد ' + o.daysToEta + ' يوم'}</span>` : ''}`;
+  const dueCell = o => !o.dueDate ? '<span class="muted">—</span>' : `${esc(o.dueDate)}${o.payTerm === 'credit' ? ` <span class="small">(${esc(o.dueBase)})</span>` : ''}${o.status === 'open' && o.daysToDue != null && o.dueSar > 0.5 ? ` <span class="pill ${o.daysToDue < 0 ? 'bad' : o.daysToDue <= 30 ? 'warn' : ''}">${o.daysToDue < 0 ? 'متأخر ' + (-o.daysToDue) + ' يوم' : 'بعد ' + o.daysToDue + ' يوم'}</span>` : ''}`;
   function cashBanner() {
     const H = num(db.settings.cashHorizonDays) || 60;
     const open = poSum().filter(o => o.status === 'open' && !o.pending && o.dueSar > 0.5);
     if (!open.length) return '';
-    const over = open.filter(o => o.daysToEta != null && o.daysToEta < 0), soon = open.filter(o => o.daysToEta != null && o.daysToEta >= 0 && o.daysToEta <= H);
+    const over = open.filter(o => o.daysToDue != null && o.daysToDue < 0), soon = open.filter(o => o.daysToDue != null && o.daysToDue >= 0 && o.daysToDue <= H);
     const sum = a => a.reduce((x, o) => x + o.dueSar, 0);
     const shipSoon = soon.filter(o => o.stage === 'shipped');
     return `<div class="banner ${over.length ? 'bad' : 'warn'} no-print"><span class="grow">💰 كاش مطلوب لأوامر الشراء: <b>${money(sum(soon))} ${cur()}</b> خلال ${H} يوم (${fmt(soon.length)} أمر، منها مشحون ${money(sum(shipSoon))})${over.length ? ` + <b>${money(sum(over))}</b> لأوامر متأخرة (${fmt(over.length)})` : ''} — إجمالي غير المسدد ${money(sum(open))}</span>${canSee('po') ? '<button class="sm" data-act="poTab" data-k="cash">التفاصيل</button>' : ''}</div>`;
@@ -1551,24 +1558,25 @@
     const open = all.filter(o => o.status === 'open' && !o.pending && o.dueSar > 0.5);
     const t = today();
     const MS = ['صادر', 'مشحون — بدون أوراق', 'مشحون — استلمنا الأوراق'];
-    const bucketOf = o => o.daysToEta == null ? 'بدون تاريخ' : o.daysToEta < 0 ? 'متأخر (تجاوز التاريخ)' : o.eta.slice(0, 7);
+    const bucketOf = o => o.daysToDue == null ? 'بدون تاريخ' : o.daysToDue < 0 ? 'متأخر (تجاوز التاريخ)' : o.dueDate.slice(0, 7);
     const m = new Map();
     for (const o of open) { const k = bucketOf(o); if (!m.has(k)) m.set(k, Object.assign({ key: k, count: 0, dueSar: 0, totalSar: 0, paidSar: 0 }, Object.fromEntries(MS.map((s, i) => ['s' + i, 0])))); const g = m.get(k); g.count++; g.dueSar += o.dueSar; g.totalSar += o.totalSar; g.paidSar += o.paidSar; const i = MS.indexOf(o.mainStatus); if (i >= 0) g['s' + i] += o.dueSar; }
     const ord = k => k.startsWith('متأخر') ? '0' : k === 'بدون تاريخ' ? '9' : k;
     const buckets = [...m.values()].sort((a, b) => ord(a.key).localeCompare(ord(b.key)));
     let cum = 0; buckets.forEach(b => { cum += b.dueSar; b.cum = cum; });
-    const inH = open.filter(o => o.daysToEta != null && o.daysToEta <= H);
+    const inH = open.filter(o => o.daysToDue != null && o.daysToDue <= H);
     const sum = (a, k = 'dueSar') => a.reduce((x, o) => x + o[k], 0);
-    const over = open.filter(o => o.daysToEta != null && o.daysToEta < 0);
+    const over = open.filter(o => o.daysToDue != null && o.daysToDue < 0);
     const byCur = new Map(); for (const o of inH) byCur.set(o.currency, (byCur.get(o.currency) || 0) + o.dueSar / o.rate);
     const byParty = key => [...inH.reduce((mm, o) => { const k = o[key] || '—'; const g = mm.get(k) || { key: k, count: 0, dueSar: 0 }; g.count++; g.dueSar += o.dueSar; mm.set(k, g); return mm; }, new Map()).values()];
-    return `<div class="toolbar"><label class="chk">خلال <select class="inp" data-chg="filter" data-f="cash.horizon">${[30, 60, 90, 120, 180, 365].map(d => `<option value="${d}" ${d === H ? 'selected' : ''}>${d} يوم</option>`).join('')}</select></label><span class="small">من اليوم ${esc(t)} — الأوامر المفتوحة (المعتمدة) غير المسددة بالكامل، حسب <b>الوصول المتوقع</b> (وصول المنفذ من المخلّص أو الشحن الفعلي + ${fmt(num(db.settings.shipTransitDays) || 30)} يوم — أيهما أقرب)، وبنفس الفلاتر فوق</span></div>
+    return `<div class="toolbar"><label class="chk">خلال <select class="inp" data-chg="filter" data-f="cash.horizon">${[30, 60, 90, 120, 180, 365].map(d => `<option value="${d}" ${d === H ? 'selected' : ''}>${d} يوم</option>`).join('')}</select></label><span class="small">من اليوم ${esc(t)} — الأوامر المفتوحة (المعتمدة) غير المسددة بالكامل، حسب <b>تاريخ الاستحقاق</b>: النقد عند الوصول المتوقع (وصول المنفذ من المخلّص أو الشحن الفعلي + ${fmt(num(db.settings.shipTransitDays) || 30)} يوم — أيهما أقرب)، والأجل من تاريخ الفاتورة (أو الشحن) + أيام الأجل — وبنفس الفلاتر فوق</span></div>
       <div class="kpis" style="grid-template-columns:repeat(5,minmax(0,1fr))">
         <div class="kpi"><div class="l">مطلوب خلال ${H} يوم (شامل المتأخر)</div><div class="v">${money(sum(inH))}</div><div class="s">${cur()} — ${fmt(inH.length)} أمر${[...byCur].map(([c, v]) => c !== db.currencies[0].code ? ` — ${money(v)} ${esc(curName(c))}` : '').join('')}</div></div>
         ${MS.map(s => { const a = inH.filter(o => o.mainStatus === s); return `<div class="kpi"><div class="l">منها ${esc(s)}</div><div class="v">${money(sum(a))}</div><div class="s">${fmt(a.length)} أمر</div></div>`; }).join('')}
-        <div class="kpi"><div class="l">بعد ${H} يوم</div><div class="v">${money(sum(open.filter(o => o.daysToEta != null && o.daysToEta > H)))}</div><div class="s">متأخر ${money(sum(over))} (${fmt(over.length)}) — كل غير المسدد ${money(sum(open))}</div></div>
+        <div class="kpi"><div class="l">بعد ${H} يوم</div><div class="v">${money(sum(open.filter(o => o.daysToDue != null && o.daysToDue > H)))}</div><div class="s">متأخر ${money(sum(over))} (${fmt(over.length)}) — كل غير المسدد ${money(sum(open))}</div></div>
       </div>
-      <div class="card"><h2>حسب شهر الوصول</h2>${table('cashBuckets', [
+      ${(() => { const cr = inH.filter(o => o.payTerm === 'credit'), cs = inH.filter(o => o.payTerm !== 'credit'); return `<div class="toolbar"><span class="pill">نقد ${money(sum(cs))} (${fmt(cs.length)} أمر)</span><span class="pill brand">أجل ${money(sum(cr))} (${fmt(cr.length)} أمر)</span><span class="small">خلال ${H} يوم</span></div>`; })()}
+      <div class="card"><h2>حسب شهر الاستحقاق</h2>${table('cashBuckets', [
         { k: 'key', h: 'الشهر', v: b => /^\d{4}-\d{2}$/.test(b.key) ? monthLabel(b.key) : b.key }, { k: 'count', h: 'أوامر', n: true },
         ...MS.map((s, i) => ({ k: 's' + i, h: 'منه ' + s, n: true })), { k: 'paidSar', h: 'مدفوع مقدمًا', n: true }, { k: 'dueSar', h: 'المطلوب', n: true, f: b => `<b>${money(b.dueSar)}</b>` }, { k: 'cum', h: 'تراكمي', n: true }
       ], buckets, { short: true, nofilter: true, empty: 'لا يوجد كاش مطلوب' })}</div>
@@ -1577,10 +1585,22 @@
         <div class="card"><h2>حسب المخلّص (خلال ${H} يوم)</h2>${table('cashAgents', [{ k: 'key', h: 'المخلّص' }, { k: 'count', h: 'أوامر', n: true }, { k: 'dueSar', h: 'المطلوب', n: true }], byParty('clearer'), { short: true, nofilter: true, sort: 'dueSar' })}</div>
       </div>
       <div class="card"><h2>الأوامر المطلوب سدادها خلال ${H} يوم</h2>${table('cashList', [
-        { k: 'eta', h: 'الوصول المتوقع', f: etaCell }, { k: 'no', h: 'رقم الأمر' }, { k: 'mainStatus', h: 'الحالة', f: o => mainPill(o) }, { k: 'blNo', h: 'البوليصة' }, { k: 'forwarder', h: 'CO' }, { k: 'clearer', h: 'المخلّص' }, { k: 'supplier', h: 'المورد' }, { k: 'currency', h: 'العملة', v: o => curName(o.currency) },
+        { k: 'dueDate', h: 'تاريخ الاستحقاق', f: dueCell }, { k: 'payTerm', h: 'نقد / أجل', v: termLabel }, { k: 'eta', h: 'الوصول المتوقع', f: etaCell }, { k: 'no', h: 'رقم الأمر' }, { k: 'mainStatus', h: 'الحالة', f: o => mainPill(o) }, { k: 'blNo', h: 'البوليصة' }, { k: 'forwarder', h: 'CO' }, { k: 'clearer', h: 'المخلّص' }, { k: 'supplier', h: 'المورد' }, { k: 'currency', h: 'العملة', v: o => curName(o.currency) },
         { k: 'total', h: 'الإجمالي بالعملة', n: true, d: 2 }, { k: 'totalSar', h: 'الإجمالي ' + cur(), n: true }, { k: 'paidSar', h: 'مدفوع', n: true }, { k: 'dueSar', h: 'المطلوب', n: true, f: o => `<b>${money(o.dueSar)}</b>` },
         { k: 'payStatus', h: 'السداد', f: o => payPill(o.payStatus) }, { k: 'note', h: 'ملاحظة', cls: 'wrap' }
-      ], inH, { sort: 'eta', dir: 1, onRow: o => poModal(o.no), empty: 'لا يوجد', foot: { no: 'الإجمالي', totalSar: money(sum(inH, 'totalSar')), paidSar: money(sum(inH, 'paidSar')), dueSar: money(sum(inH)) } })}</div>`;
+      ], inH, { sort: 'dueDate', dir: 1, onRow: o => poModal(o.no), empty: 'لا يوجد', foot: { no: 'الإجمالي', totalSar: money(sum(inH, 'totalSar')), paidSar: money(sum(inH, 'paidSar')), dueSar: money(sum(inH)) } })}</div>`;
+  }
+  // شروط الدفع للموردين: نقد أو أجل وكم يوم — تنطبق على كل أوامر المورد إلا اللي تغيّرت يدويًا
+  function supplierTermsCard() {
+    const m = new Map(); for (const o of Object.values(db.po.orders)) { const s = String(o.supplier || '').trim(); if (!s) continue; const g = m.get(s) || { open: 0, all: 0 }; g.all++; if (o.status === 'open') g.open++; m.set(s, g); }
+    Object.keys(db.supplierTerms || {}).forEach(s => { if (!m.has(s)) m.set(s, { open: 0, all: 0 }); });
+    const list = [...m].sort((a, b) => b[1].open - a[1].open || a[0].localeCompare(b[0]));
+    const T = db.supplierTerms || {};
+    return `<div class="card"><h2>شروط الدفع للموردين (نقد / أجل)</h2>
+      <div class="hint">«نقد» = نجهز الفلوس عند الوصول المتوقع. «أجل» = الاستحقاق من <b>تاريخ الفاتورة</b> + أيام الأجل، ولو ما فيه فاتورة من <b>تاريخ الشحن الفعلي</b>، ولو لسه ما انشحن من الشحن المتوقع (تقديري). تقدر تغيّر أمر معيّن من شاشة الأمر أو التعديل الجماعي.</div>
+      ${list.length ? `<div style="max-height:360px;overflow:auto;margin-top:8px"><table class="t" style="max-width:720px"><thead><tr><th>المورد</th><th class="n">أوامر مفتوحة</th><th>نقد / أجل</th><th>أيام الأجل</th></tr></thead><tbody>
+      ${list.map(([s, g]) => { const t = T[s] || {}; return `<tr><td>${esc(s)}</td><td class="n">${fmt(g.open)}</td><td><select class="inp" data-chg="supTerm" data-s="${esc(s)}" data-k="kind"><option value="cash" ${t.kind !== 'credit' ? 'selected' : ''}>نقد</option><option value="credit" ${t.kind === 'credit' ? 'selected' : ''}>أجل</option></select></td><td><input class="inp" style="width:90px" type="number" step="1" min="0" data-chg="supTerm" data-s="${esc(s)}" data-k="days" value="${t.days || ''}" ${t.kind === 'credit' ? '' : 'disabled'}></td></tr>`; }).join('')}
+      </tbody></table></div>` : '<p class="small">ما فيه موردين بعد — يطلعون هنا بعد استيراد أوامر الشراء.</p>'}</div>`;
   }
   function poColsModal() {
     const vis = new Set(masterColsVisible().map(c => c.k));
@@ -1798,6 +1818,9 @@
         <label class="f">سعر صرف خاص (فارغ = من الإعدادات)<input id="o_rate" type="number" step="any" value="${o.rate || ''}" ${dis(canPay)}></label>
         <label class="f">رسوم الشحن (بعملة الأمر)<input id="o_ship" type="number" step="any" value="${o.shipping || ''}" ${dis(canPay)}></label>
         <label class="f">تاريخ تعميد الشحن (من أونكس)<input id="o_award" type="date" value="${esc(o.shipAwardDate || '')}" ${dis(canSt || canPay)}></label>
+        ${(() => { const sp = (db.supplierTerms || {})[String(o.supplier || '').trim()], sl = sp && sp.kind === 'credit' ? 'أجل ' + fmt(sp.days) + ' يوم' : sp && sp.kind === 'cash' ? 'نقد' : 'نقد (افتراضي)'; return `<label class="f">نقد / أجل<select id="o_term" ${dis(canPay)}><option value="" ${!o.payTerm ? 'selected' : ''}>حسب المورد — ${esc(sl)}</option><option value="cash" ${o.payTerm === 'cash' ? 'selected' : ''}>نقد (عند الوصول)</option><option value="credit" ${o.payTerm === 'credit' ? 'selected' : ''}>أجل</option></select></label>
+        <label class="f">أيام الأجل (فارغ = من المورد)<input id="o_pdays" type="number" step="1" min="0" value="${o.payDays || ''}" ${dis(canPay)}></label>
+        <label class="f">تاريخ الفاتورة (بداية الأجل)<input id="o_inv" type="date" value="${esc(o.invoiceDate || '')}" ${dis(canSt || canPay)}></label>`; })()}
         ${(o.lines || []).length ? '' : `<label class="f">قيمة الأمر (بدون أصناف)<input id="o_val" type="number" step="any" value="${o.manualValue || ''}" ${dis(canPay)}></label>`}
         <label class="f">تاريخ الأمر<input id="o_pd" type="date" value="${esc(o.poDate || '')}" ${dis(canSt || canPay)}></label>
         <label class="f">مشحون (يدوي) — للشحن على المورد أو رسوم ما انسجلت<select id="o_shipm" ${dis(canSt || canPay)}><option value="" ${o.shippedManual ? '' : 'selected'}>لا (حسب رسوم الشحن)</option><option value="yes" ${o.shippedManual ? 'selected' : ''}>نعم — مشحون</option></select></label>
@@ -1863,7 +1886,8 @@
           if (canPay || canSt) {
             o.note = m.q('#o_note').value.trim(); o.poDate = m.q('#o_pd').value;
             saveShipTrack(m, o);
-            o.shipDate = m.q('#o_sd').value; o.shipAwardDate = m.q('#o_award').value;
+            o.shipDate = m.q('#o_sd').value; o.shipAwardDate = m.q('#o_award').value; o.invoiceDate = m.q('#o_inv').value;
+            if (!m.q('#o_term').disabled) { o.payTerm = m.q('#o_term').value; o.payDays = m.q('#o_pdays').value === '' ? '' : num(m.q('#o_pdays').value); }
             const sm2 = m.q('#o_shipm').value === 'yes'; if (!!o.shippedManual !== sm2) { if (sm2) o.shippedManual = true; else delete o.shippedManual; log(`أمر الشراء ${no}: ${sm2 ? 'مشحون (يدوي)' : 'إلغاء مشحون يدوي'}`); }
             const dm = m.q('#o_docs').value; if ((o.docsManual === 'yes' ? 'yes' : '') !== dm) { if (dm) o.docsManual = 'yes'; else delete o.docsManual; log(`أمر الشراء ${no}: ${dm ? 'استلمنا الأوراق' : 'ما استلمنا الأوراق'}`); }
           }
@@ -2184,6 +2208,9 @@
           <label class="f">الأوراق<select id="b_docs">${keep}<option value="yes">استلمنا الأوراق</option><option value="no">ما استلمنا الأوراق</option></select></label>
           <label class="f">تاريخ الشحن الفعلي (البوليصة)<input id="b_shipdate" type="date"></label>
           <label class="f">تاريخ تعميد الشحن<input id="b_award" type="date"></label>
+          <label class="f">نقد / أجل<select id="b_term">${keep}<option value="auto">حسب المورد</option><option value="cash">نقد</option><option value="credit">أجل</option></select></label>
+          <label class="f">أيام الأجل<input id="b_pdays" type="number" step="1" min="0"></label>
+          <label class="f">تاريخ الفاتورة<input id="b_inv" type="date"></label>
           <label class="f">الوصول المتوقع<input id="b_eta" type="date"></label>
           <label class="chk" style="margin-top:22px"><input type="checkbox" id="b_etaauto"> إرجاع الوصول المتوقع للتلقائي</label>
         </div>`)}
@@ -2237,6 +2264,9 @@
               else if (status === 'open' && o.status === 'received') { o.status = 'open'; o.receivedAt = ''; o.receivedBy = ''; ch = true; }
               if (sd && status !== 'shipped') { o.shipDate = sd; ch = true; }
               const aw = v('#b_award'); if (aw) { o.shipAwardDate = aw; ch = true; }
+              const tm = v('#b_term'); if (tm) { o.payTerm = tm === 'auto' ? '' : tm; ch = true; }
+              const pdy = v('#b_pdays'); if (pdy !== '' && pdy != null) { o.payDays = num(pdy); ch = true; }
+              const inv = v('#b_inv'); if (inv) { o.invoiceDate = inv; ch = true; }
               if (eta) { o.eta = eta; o.etaManual = true; ch = true; } else if (v('#b_etaauto')) { o.eta = ''; o.etaManual = false; ch = true; }
             }
             if (cP) {
@@ -2326,6 +2356,8 @@
       ${(db.warehouses || []).map((w, i) => `<tr><td><input class="inp" style="width:90px" data-chg="wh" data-i="${i}" data-k="code" value="${esc(w.code)}"></td><td><input class="inp" style="width:260px" data-chg="wh" data-i="${i}" data-k="name" value="${esc(w.name || '')}" placeholder="مثال: مستودع جدة"></td>
         <td class="n">${fmt(Object.values(db.po.orders).filter(o => o.status === 'open' && (o.lines || []).some(l => String(l.warehouse || '').trim() === w.code)).length)}</td><td><button class="sm danger" data-act="delWh" data-i="${i}">حذف</button></td></tr>`).join('') || '<tr><td colspan="4" class="muted">لا توجد مخازن بعد — تنضاف من تقرير أوامر الشراء</td></tr>'}
       </tbody></table><button class="sm" data-act="addWh" style="margin-top:8px">+ إضافة مخزن</button></div>
+
+    ${supplierTermsCard()}
 
     <div class="card"><h2>العملات وأسعار الصرف (لأوامر الشراء والكاش)</h2>
       <div class="hint">كل المبالغ تتحول للعملة الأساسية (${esc(cur())}) بسعر الصرف هنا. تقدر تحدد سعر صرف خاص لأمر معيّن من شاشة الأمر.</div>
@@ -2728,12 +2760,12 @@
   function docsTemplateSpec() {
     const rows = masterAll().filter(o => o.status === 'open' && !o.pending)
       .sort((a, b) => (a.docs - b.docs) || String(a.no).localeCompare(String(b.no)))
-      .map(o => { const po = db.po.orders[o.no]; return { poNo: o.no, co: o.forwarder, supplier: o.supplier, shipping: o.shipping, blNo: o.blNo, shippedManual: o.shippedManual ? 'نعم' : '', shipDate: po.shipDate || '', docs: o.docs ? 'نعم' : '', docsDate: po.docsAt || '', note: po.docsNote || '' }; });
+      .map(o => { const po = db.po.orders[o.no]; return { poNo: o.no, co: o.forwarder, supplier: o.supplier, shipping: o.shipping, blNo: o.blNo, shippedManual: o.shippedManual ? 'نعم' : '', shipDate: po.shipDate || '', invoiceDate: po.invoiceDate || '', docs: o.docs ? 'نعم' : '', docsDate: po.docsAt || '', note: po.docsNote || '' }; });
     const yn = "'القوائم'!$A$2:$A$3";
     return { sheets: [
       { name: 'استلام الأوراق', title: 'استلام أوراق الشحن (البوليصة/التلكس)' + (db.settings.companyName ? ' — ' + db.settings.companyName : ''), subtitle: 'كل الأوامر المفتوحة. «استلمنا الأوراق» = نعم للي استلمنا أوراقه. «مشحون (يدوي)» = نعم للي انشحن وما له رسوم شحن في أونكس (الشحن على المورد). «لا» تلغي، والفاضي ما يغيّر شي.', columns: [
         { header: 'رقم الأمر', key: 'poNo', width: 12 }, { header: 'CO', key: 'co', width: 22 }, { header: 'المورد', key: 'supplier', width: 18 }, { header: 'رسوم الشحن', key: 'shipping', width: 12, fmt: '#,##0.00' },
-        { header: 'رقم البوليصة', key: 'blNo', width: 18, input: true }, { header: 'مشحون (يدوي)', key: 'shippedManual', width: 13, input: true, listRef: yn, listStrict: true }, { header: 'تاريخ الشحن الفعلي (البوليصة)', key: 'shipDate', width: 16, input: true, fmt: 'yyyy-mm-dd' }, { header: 'استلمنا الأوراق', key: 'docs', width: 14, input: true, listRef: yn, listStrict: true },
+        { header: 'رقم البوليصة', key: 'blNo', width: 18, input: true }, { header: 'مشحون (يدوي)', key: 'shippedManual', width: 13, input: true, listRef: yn, listStrict: true }, { header: 'تاريخ الشحن الفعلي (البوليصة)', key: 'shipDate', width: 16, input: true, fmt: 'yyyy-mm-dd' }, { header: 'تاريخ الفاتورة', key: 'invoiceDate', width: 14, input: true, fmt: 'yyyy-mm-dd' }, { header: 'استلمنا الأوراق', key: 'docs', width: 14, input: true, listRef: yn, listStrict: true },
         { header: 'تاريخ الاستلام', key: 'docsDate', width: 14, input: true, fmt: 'yyyy-mm-dd' }, { header: 'ملاحظة', key: 'note', width: 30, input: true }
       ], rows },
       { name: 'القوائم', columns: [{ header: 'استلمنا الأوراق', key: 'v', width: 16 }], rows: [{ v: 'نعم' }, { v: 'لا' }] }
@@ -3219,6 +3251,12 @@
       const x = db.parties[+el.dataset.i], key = el.dataset.k;
       if (key === 'freeDays') x.freeDays = el.value === '' ? null : num(el.value); else x[key] = el.value.trim();
       return commit();
+    }
+    if (k === 'supTerm') {
+      db.supplierTerms = db.supplierTerms || {};
+      const s = el.dataset.s, t = db.supplierTerms[s] = db.supplierTerms[s] || { kind: 'cash', days: 0 };
+      if (el.dataset.k === 'kind') t.kind = el.value === 'credit' ? 'credit' : 'cash'; else t.days = num(el.value);
+      log(`شرط الدفع للمورد ${s}: ${t.kind === 'credit' ? 'أجل ' + t.days + ' يوم' : 'نقد'}`); return commit();
     }
     if (k === 'wh') {
       const w = db.warehouses[+el.dataset.i]; w[el.dataset.k] = el.value.trim();

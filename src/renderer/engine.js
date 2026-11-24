@@ -622,6 +622,25 @@
     if (!c.length && o.shipAwardDate) c.push(addDaysDate(o.shipAwardDate, T));
     return c.length ? c.sort()[0] : '';
   }
+  // ---------- نقد / أجل ----------
+  // شرط الدفع: يدوي على الأمر، وإلا من المورد (الإعدادات)، وإلا نقد
+  function payTermOf(db, o) {
+    const sup = ((db.supplierTerms || {})[String(o.supplier || '').trim()]) || null;
+    if (o.payTerm === 'cash' || o.payTerm === 'credit') return { kind: o.payTerm, days: o.payTerm === 'credit' ? (num(o.payDays) || (sup && num(sup.days)) || 0) : 0, src: 'يدوي' };
+    if (sup && (sup.kind === 'cash' || sup.kind === 'credit')) return { kind: sup.kind, days: sup.kind === 'credit' ? num(sup.days) : 0, src: 'المورد' };
+    return { kind: 'cash', days: 0, src: 'افتراضي' };
+  }
+  // تاريخ الاستحقاق (عليه يتحسب الكاش): النقد ← الوصول المتوقع. الأجل ← تاريخ الفاتورة + أيام الأجل، وإلا تاريخ الشحن الفعلي + أيام الأجل،
+  // وإلا (لسه ما انشحن) الشحن المتوقع (تعميد الشحن أو الخطة أو الوصول − مدة الشحن) + أيام الأجل
+  function dueDateOf(db, o, eta, shipPlanned) {
+    const pt = payTermOf(db, o);
+    if (pt.kind !== 'credit') return { date: eta || '', base: 'الوصول المتوقع', pt };
+    const T = num((db.settings || {}).shipTransitDays) || 30;
+    if (o.invoiceDate) return { date: addDaysDate(o.invoiceDate, pt.days), base: 'تاريخ الفاتورة', pt };
+    if (o.shipDate) return { date: addDaysDate(o.shipDate, pt.days), base: 'تاريخ الشحن', pt };
+    const est = o.shipAwardDate || shipPlanned || (eta ? addDaysDate(eta, -T) : '');
+    return { date: est ? addDaysDate(est, pt.days) : '', base: 'شحن متوقع (تقديري)', pt };
+  }
   function poAutoEta(db, o, todayIso) {
     const a = arrivalEta(db, o); if (a) return a;
     if ((db.shipStages || []).length && isForeign(db, o)) { const p = poPlan(db, o, todayIso); if (p.eta) return p.eta; }
@@ -670,12 +689,15 @@
       const expShip = plan && o.status === 'open' && !isShipped(o) && !docsOf(o) ? plan.shipPlanned : '';
       const shipLateDays = expShip ? dayDiff(today, expShip) : 0;
       const daysToEta = eta ? dayDiff(eta, today) : null;
+      const due = dueDateOf(db, o, eta, plan ? plan.shipPlanned : '');
+      const daysToDue = due.date ? dayDiff(due.date, today) : null;
       const payStatus = o.payClosed ? 'مسدد' : totalSar <= 0 ? 'غير محدد' : paidSar <= 0.005 ? 'غير مسدد' : paidSar + 0.5 >= totalSar ? 'مسدد' : 'مسدد جزئيًا';
       const docs = docsOf(o);
       return {
         no, status: o.status, stage: stageOf(o), stageLabel: STAGE_LABEL[stageOf(o)], mainStatus: mainStatusOf(o, docs), pending: !!o.pendingApproval, docs, shippedManual: o.shippedManual === true, foreign,
         blNo: o.blNo || '', shipDate: o.shipDate || '', shipAwardDate: o.shipAwardDate || '', attachments: (o.attachments || []).length, currency: o.currency || 'SAR', rate, value, shipping, extras, extrasSar, total, totalSar, paidSar, dueSar, payStatus,
-        remainingValue, lines: (o.lines || []).length, eta, etaManual: !!o.etaManual, daysToEta, planEta: plan ? plan.planEta : '', variance: plan && !o.etaManual ? plan.variance : (plan && plan.planEta && eta ? dayDiff(eta, plan.planEta) : null),
+        remainingValue, lines: (o.lines || []).length, eta, etaManual: !!o.etaManual, daysToEta,
+        payTerm: due.pt.kind, payDays: due.pt.days, payTermSrc: due.pt.src, invoiceDate: o.invoiceDate || '', dueDate: due.date, dueBase: due.base, daysToDue, planEta: plan ? plan.planEta : '', variance: plan && !o.etaManual ? plan.variance : (plan && plan.planEta && eta ? dayDiff(eta, plan.planEta) : null),
         agent: o.agent || '', supplier: o.supplier || '',
         firstSeen: o.firstSeen || '', lastSeen: o.lastSeen || '', receivedAt: o.receivedAt || '', receivedBy: o.receivedBy || '', note: o.note || '', poDate: o.poDate || '',
         payments: (o.payments || []).length, flags: o.flags || [], expShip, shipLate: shipLateDays > 0 && !o.pendingApproval, shipLateDays: Math.max(0, shipLateDays)
@@ -758,7 +780,7 @@
   }
 
   const Engine = {
-    CARRIERS, carrierOf, trackUrl, genericUrl, prefixesOf, compute, openPoLines, poSummary, defaultShipStages, trackStageIndex, setTrackStage, trackSummary, poAutoEta, poPrepDays, poExpectedShip, addDaysDate, stageOf, STAGE_LABEL, poPlan, stageDur, isForeign, MAIN_STATUSES, mainStatusOf, dayDiff, poLead, addMonthsDate, fxRate, normsinv, normUnit, normCode, num, toMonth, monthAdd, monthLabel,
+    payTermOf, dueDateOf, CARRIERS, carrierOf, trackUrl, genericUrl, prefixesOf, compute, openPoLines, poSummary, defaultShipStages, trackStageIndex, setTrackStage, trackSummary, poAutoEta, poPrepDays, poExpectedShip, addDaysDate, stageOf, STAGE_LABEL, poPlan, stageDur, isForeign, MAIN_STATUSES, mainStatusOf, dayDiff, poLead, addMonthsDate, fxRate, normsinv, normUnit, normCode, num, toMonth, monthAdd, monthLabel,
     unitFactor, purchaseFactor, allUnits, emptyDb, defaultSettings, defaultClasses, abc, roundUp, exceptionApplies
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Engine;
