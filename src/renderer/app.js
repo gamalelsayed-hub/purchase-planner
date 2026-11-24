@@ -2368,7 +2368,7 @@
   }
   // نسخة الطباعة / PDF: جداول للقراءة بدل خانات التعديل
   function specHtml(spec, title) {
-    const cell = (c, v) => v == null || v === '' ? '' : typeof v === 'number' ? fmt(v, c.fmt && /\./.test(c.fmt) ? 2 : 0) : esc(v);
+    const cell = (c, v) => v == null || v === '' ? '' : typeof v === 'number' ? fmt(v, Number.isInteger(v) ? 0 : c.key === 'z' || c.key === 'rate' ? 4 : 2) : esc(v);
     return `<div class="page-head"><div><h1>${esc(title)}</h1><div class="sub">${esc(db.settings.companyName || '')} — ${esc(today())}</div></div></div>` +
       spec.sheets.filter(s => s.rows.length).map(s => `<div class="card" style="break-inside:avoid-page"><h2>${esc(s.name)}</h2><table class="t"><thead><tr>${s.columns.map(c => `<th>${esc(c.header)}</th>`).join('')}</tr></thead><tbody>${s.rows.map(r => `<tr>${s.columns.map(c => `<td class="${typeof r[c.key] === 'number' ? 'n' : ''}" style="${c.key === 'url' ? 'direction:ltr;word-break:break-all;font-size:11px' : ''}">${cell(c, r[c.key])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`).join('');
   }
