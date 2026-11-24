@@ -168,7 +168,7 @@
     } catch (e) { toast('تعذر الحفظ: ' + e.message, 'bad'); return false; }
   }
   function recompute() { res = E.compute(db); }
-  function commit() { recompute(); if (!ui.readOnly) { dirty = true; scheduleSave(); } render(); }
+  function commit() { if (db && db.po) { const nw = E.syncCarriers(db); if (nw.length) { log('ناقل جديد أضيف تلقائيًا: ' + nw.join('، ')); setTimeout(() => toast('🚢 ناقل جديد أضيف للإعدادات: ' + nw.join('، ')), 50); } } recompute(); if (!ui.readOnly) { dirty = true; scheduleSave(); } render(); }
 
   function toForeignCurrency(d) {
     const base = (d.currencies[0] || {}).code || 'SAR';
@@ -218,6 +218,7 @@
     if ((d.meta.foreignV || 0) < 1) { if (d.settings.allPoForeign !== false) toForeignCurrency(d); d.meta.foreignV = 1; }
     // حاويات انحفظت كسطر واحد فيه رقمين («TSSU2470630|TSSU2470749») ← تنفصل
     if ((d.meta.contFixV || 0) < 1) { I.fixMergedContainers(d); d.meta.contFixV = 1; }
+    E.syncCarriers(d);
     // قائمة المخازن (رقم ← اسم) — تبدأ من أرقام المخازن الموجودة في أوامر الشراء
     if (!Array.isArray(d.warehouses)) d.warehouses = [{ code: '1002', name: 'المركزي' }, { code: '1101', name: 'الخمرة' }, { code: '1201', name: 'الرياض' }];
     for (const o of Object.values((d.po && d.po.orders) || {})) for (const l of o.lines || []) { const c = String(l.warehouse || '').trim(); if (c && !d.warehouses.some(w => w.code === c)) d.warehouses.push({ code: c, name: '' }); }
@@ -1591,6 +1592,22 @@
       ], inH, { sort: 'dueDate', dir: 1, onRow: o => poModal(o.no), empty: 'لا يوجد', foot: { no: 'الإجمالي', totalSar: money(sum(inH, 'totalSar')), paidSar: money(sum(inH, 'paidSar')), dueSar: money(sum(inH)) } })}</div>`;
   }
   // شروط الدفع للموردين: نقد أو أجل وكم يوم — تنطبق على كل أوامر المورد إلا اللي تغيّرت يدويًا
+  // الخطوط الناقلة وروابط التتبع
+  function carriersCard() {
+    const L = E.carrierList(db), cnt = new Map();
+    for (const o of Object.values(db.po.orders)) { if (o.status !== 'open') continue; const c = E.carrierOf(o, db); if (c) cnt.set(c.id, (cnt.get(c.id) || 0) + 1); }
+    const rows = L.map((c, i) => ({ c, i })); // الجديد ينضاف فوق
+    return `<div class="card"><h2>الخطوط الناقلة وروابط التتبع</h2>
+      <div class="hint">البرنامج يعرف الناقل من <b>أول 4 حروف</b> في رقم البوليصة أو الحاوية. الرابط: اكتب <b>{n}</b> مكان رقم الحاوية/البوليصة (مثال: https://www.msc.com/track?no={n})، ولو تركته فاضي يفتح البحث العام track-trace. <b>أي بوليصة ببادئة جديدة تنضاف هنا تلقائيًا</b> (معلّمة «جديد») — عدّل اسمها ورابطها، أو اختر الناقل من شاشة الأمر وتنتقل البادئة له.</div>
+      <div style="max-height:420px;overflow:auto;margin-top:8px"><table class="t"><thead><tr><th>الناقل</th><th>بادئات الحاوية</th><th>بادئات البوليصة</th><th>رابط التتبع</th><th class="n">أوامر مفتوحة</th><th></th></tr></thead><tbody>
+      ${rows.map(({ c, i }) => `<tr><td><input class="inp" style="width:150px" data-chg="carrier" data-i="${i}" data-k="name" value="${esc(c.name)}">${c.auto ? ' <span class="pill warn">جديد</span>' : ''}</td>
+        <td><input class="inp" style="width:150px;direction:ltr" data-chg="carrier" data-i="${i}" data-k="cont" value="${esc((c.cont || []).join(', '))}" placeholder="—"></td>
+        <td><input class="inp" style="width:120px;direction:ltr" data-chg="carrier" data-i="${i}" data-k="bl" value="${esc((c.bl || []).join(', '))}"></td>
+        <td><input class="inp" style="width:320px;direction:ltr" data-chg="carrier" data-i="${i}" data-k="url" value="${esc(c.url || '')}" placeholder="فاضي = track-trace"></td>
+        <td class="n">${fmt(cnt.get(c.id) || 0)}</td><td style="white-space:nowrap">${c.url || (c.bl || []).length || (c.cont || []).length ? `<button class="sm" data-act="carrierTest" data-i="${i}" title="فتح الرابط لتجربته">🔗</button> ` : ''}<button class="sm danger" data-act="carrierDel" data-i="${i}">حذف</button></td></tr>`).join('')}
+      </tbody></table></div>
+      <button class="sm" data-act="carrierAdd" style="margin-top:8px">+ إضافة ناقل</button></div>`;
+  }
   function supplierTermsCard() {
     const m = new Map(); for (const o of Object.values(db.po.orders)) { const s = String(o.supplier || '').trim(); if (!s) continue; const g = m.get(s) || { open: 0, all: 0 }; g.all++; if (o.status === 'open') g.open++; m.set(s, g); }
     Object.keys(db.supplierTerms || {}).forEach(s => { if (!m.has(s)) m.set(s, { open: 0, all: 0 }); });
@@ -1991,7 +2008,8 @@
     const link = (n, label) => { const u = E.trackUrl(o, n, db), g = E.genericUrl(n || o.blNo); return (u ? `<button class="sm" data-trackurl="${esc(u)}" title="موقع الخط الناقل">🔗 ${esc(label)}</button>` : '') + (g && g !== u ? `<button class="sm" data-trackurl="${esc(g)}" title="بحث عام في كل الخطوط (track-trace)">🔎</button>` : ''); };
     return `<h3>تتبع الشحنة</h3>
       <div class="form f4">
-        <label class="f">الخط الناقل${auto ? ` <span class="small">(تلقائي ${esc(auto.src || '')}: ${esc(auto.name)})</span>` : ''}<select id="tk_carrier" ${dis}><option value="">${auto ? 'تلقائي — ' + esc(auto.name) : '— غير معروف —'}</option>${E.CARRIERS.map(c => `<option value="${c.id}" ${t.carrier === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+        <label class="f">الخط الناقل${auto ? ` <span class="small">(تلقائي ${esc(auto.src || '')}: ${esc(auto.name)})</span>` : ''}<select id="tk_carrier" ${dis}><option value="">${auto ? 'تلقائي — ' + esc(auto.name) : '— غير معروف —'}</option>${E.carrierList(db).map(c => `<option value="${esc(c.id)}" ${t.carrier === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+        <label class="f">أو ناقل جديد (اكتب اسمه)<input id="tk_newc" placeholder="ينضاف للإعدادات" ${dis}></label>
         <label class="f">اسم السفينة<input id="tk_vessel" value="${esc(t.vessel || '')}" ${dis}></label>
         <label class="f">رقم الرحلة<input id="tk_voyage" value="${esc(t.voyage || '')}" ${dis}></label>
         <label class="f">ETA الباخرة (من موقع الخط)<input id="tk_eta" type="date" value="${esc(t.vesselEta || '')}" ${dis}></label>
@@ -2004,17 +2022,21 @@
   function saveShipTrack(m, o) {
     if (!m.q('#tk_carrier') || m.q('#tk_carrier').disabled) return;
     o.track = o.track || { history: [], containers: [] };
-    const t = o.track, cr = m.q('#tk_carrier').value;
+    const t = o.track; let cr = m.q('#tk_carrier').value;
+    const nn = (m.q('#tk_newc') || {}).value ? m.q('#tk_newc').value.trim() : '';
+    if (nn) {
+      E.syncCarriers(db);
+      let c = db.carriers.find(x => x.name.toLowerCase() === nn.toLowerCase());
+      if (!c) { c = { id: 'U' + Date.now(), name: nn, cont: [], bl: [], url: '' }; db.carriers.push(c); log('ناقل جديد: ' + nn); }
+      cr = c.id;
+    }
     t.vessel = m.q('#tk_vessel').value.trim(); t.voyage = m.q('#tk_voyage').value.trim(); t.vesselEta = m.q('#tk_eta').value;
     const st = m.q('#tk_status').value.trim(); if (st !== (t.trackStatus || '')) { t.trackStatus = st; t.trackStatusAt = m.q('#tk_at').value || today(); } else t.trackStatusAt = m.q('#tk_at').value || t.trackStatusAt || '';
     if (cr !== (t.carrier || '')) {
       t.carrier = cr;
       if (cr) { // تعلّم البادئات غير المعروفة ← تنطبق على باقي الأوامر
-        db.carrierMap = db.carrierMap || {};
-        const px = E.prefixesOf(o), known = k => E.CARRIERS.some(c => c.cont.includes(k)), knownB = k => E.CARRIERS.some(c => c.bl.includes(k));
-        px.cont.filter(k => !known(k)).forEach(k => { db.carrierMap['C:' + k] = cr; });
-        if (px.bl && !knownB(px.bl)) db.carrierMap['B:' + px.bl] = cr;
-        log(`الخط الناقل للأمر ${o.no}: ${cr} (يتعلّم البادئات: ${px.cont.concat(px.bl ? [px.bl] : []).join('، ')})`);
+        const ln = E.learnCarrier(db, o, cr);
+        log(`الخط الناقل للأمر ${o.no}: ${(db.carriers.find(x => x.id === cr) || {}).name || cr}${ln.length ? ' (تعلّم البادئات: ' + ln.join('، ') + ')' : ''}`);
       }
     }
   }
@@ -2358,6 +2380,8 @@
       </tbody></table><button class="sm" data-act="addWh" style="margin-top:8px">+ إضافة مخزن</button></div>
 
     ${supplierTermsCard()}
+
+    ${carriersCard()}
 
     <div class="card"><h2>العملات وأسعار الصرف (لأوامر الشراء والكاش)</h2>
       <div class="hint">كل المبالغ تتحول للعملة الأساسية (${esc(cur())}) بسعر الصرف هنا. تقدر تحدد سعر صرف خاص لأمر معيّن من شاشة الأمر.</div>
@@ -3069,6 +3093,11 @@
       it.units.push({ name: unit, factor: f }); log(`تعريف وحدة ${unit}=${f} للصنف ${code}`); commit();
     },
     addType: () => { db.types.push({ name: 'نوع جديد', leadTime: 1, extraMonths: 0, note: '', currency: db.currencies[0].code }); commit(); },
+    carrierAdd: () => { E.syncCarriers(db); db.carriers.unshift({ id: 'U' + Date.now(), name: 'ناقل جديد', cont: [], bl: [], url: '' }); commit(); },
+    carrierDel: async el => { E.syncCarriers(db); const c = db.carriers[+el.dataset.i]; if (!c) return; if (!await confirmBox(`حذف الناقل «${esc(c.name)}»؟`, { ok: 'حذف', danger: true })) return;
+      db.carriers.splice(+el.dataset.i, 1); if (E.CARRIERS.some(x => x.id === c.id)) { db.carriersDeleted = db.carriersDeleted || []; db.carriersDeleted.push(c.id); }
+      if (c.auto) { db.carriersDeleted = db.carriersDeleted || []; (c.bl || []).forEach(b => db.carriersDeleted.push('B:' + b)); } commit(); },
+    carrierTest: el => { const c = E.carrierList(db)[+el.dataset.i]; const n = (c.bl || [])[0] || (c.cont || [])[0] || ''; const u = (c.url || 'https://www.track-trace.com/container?number={n}').replace('{n}', encodeURIComponent(n)); api.openTrack(u); },
     addWh: () => { db.warehouses = db.warehouses || []; db.warehouses.push({ code: '', name: '' }); commit(); },
     delWh: el => { db.warehouses.splice(+el.dataset.i, 1); commit(); },
     addCur: () => { db.currencies.push({ code: 'EUR', name: 'يورو', rate: 4 }); commit(); },
@@ -3251,6 +3280,15 @@
       const x = db.parties[+el.dataset.i], key = el.dataset.k;
       if (key === 'freeDays') x.freeDays = el.value === '' ? null : num(el.value); else x[key] = el.value.trim();
       return commit();
+    }
+    if (k === 'carrier') {
+      E.syncCarriers(db);
+      const c = db.carriers[+el.dataset.i], key = el.dataset.k; if (!c) return;
+      if (key === 'cont' || key === 'bl') c[key] = [...new Set(el.value.toUpperCase().split(/[\s,،;]+/).map(x => x.trim().slice(0, 4)).filter(Boolean))];
+      else if (key === 'url') { const u = el.value.trim(); if (u && !/^https:\/\//i.test(u)) { toast('الرابط لازم يبدأ بـ https://', 'bad'); return render(); } c.url = u; }
+      else c[key] = el.value.trim();
+      delete c.auto;
+      log(`الناقل ${c.name}: ${key}`); return commit();
     }
     if (k === 'supTerm') {
       db.supplierTerms = db.supplierTerms || {};

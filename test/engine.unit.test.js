@@ -473,4 +473,27 @@ assert.strictEqual(db.po.orders.K1.track.stage, 'emptyReturned'); assert.ok(db.p
   assert.strictEqual(d13.po.orders.T2.invoiceDate, '2026-10-15');
 }
 
+// الخطوط الناقلة: قائمة في الإعدادات + ناقل جديد تلقائي + التعلّم
+{
+  const d14 = E.emptyDb();
+  d14.carrierMap = { 'C:TSSU': 'MSC' };
+  d14.po.orders.K1 = { no: 'K1', status: 'open', currency: 'USD', lines: [], payments: [], blNo: 'BAXFCL017717' };
+  d14.po.orders.K2 = { no: 'K2', status: 'open', currency: 'USD', lines: [], payments: [], blNo: 'MEDUAB1234', track: { history: [], containers: [{ no: 'TSSU1234567' }] } };
+  d14.po.orders.K3 = { no: 'K3', status: 'open', currency: 'USD', lines: [], payments: [], blNo: '800BK6028846' };
+  const added = E.syncCarriers(d14);
+  assert.deepStrictEqual(added, ['BAXF'], 'new BL prefix auto-added');
+  assert.ok(!d14.carrierMap, 'old learned map moved into list');
+  assert.ok(d14.carriers.find(c => c.id === 'MSC').cont.includes('TSSU'));
+  assert.strictEqual(E.carrierOf(d14.po.orders.K1, d14).name, 'BAXF');
+  assert.deepStrictEqual(E.syncCarriers(d14), [], 'idempotent');
+  d14.carriers.find(c => c.id === 'MSC').url = 'https://example.com/t?n={n}';
+  assert.strictEqual(E.trackUrl(d14.po.orders.K2, '', d14), 'https://example.com/t?n=TSSU1234567');
+  // اختيار الناقل يدويًا لأمر بادئته مع ناقل تلقائي ← البادئة تنتقل والناقل التلقائي الفاضي ينحذف
+  E.learnCarrier(d14, d14.po.orders.K1, 'MAERSK');
+  assert.ok(d14.carriers.find(c => c.id === 'MAERSK').bl.includes('BAXF'));
+  assert.ok(!d14.carriers.some(c => c.id === 'N_BAXF'));
+  d14.carriersDeleted = ['MSC']; d14.carriers = d14.carriers.filter(c => c.id !== 'MSC'); E.syncCarriers(d14);
+  assert.ok(!d14.carriers.some(c => c.id === 'MSC'), 'deleted built-in stays deleted');
+}
+
 console.log('✓ all engine unit tests passed');

@@ -257,9 +257,9 @@ ipcMain.handle('update:install', async () => {
 });
 ipcMain.handle('app:openUrl', async (_e, url) => { if (/^https:\/\/github\.com\//.test(url)) shell.openExternal(url); });
 // صفحات تتبع الشحنات: مواقع الخطوط الملاحية المعروفة فقط
-const TRACK_HOSTS = ['cma-cgm.com', 'maersk.com', 'msc.com', 'hapag-lloyd.com', 'coscoshipping.com', 'oocl.com', 'one-line.com', 'shipmentlink.com', 'yangming.com', 'zim.com', 'hmm21.com', 'pilship.com', 'tslines.com', 'culines.com', 'ekmtc.com', 'sinokor.co.kr', 'wanhai.com', 'track-trace.com'];
 ipcMain.handle('app:openTrack', async (_e, url) => {
-  try { const u = new URL(url); if (u.protocol === 'https:' && TRACK_HOSTS.some(h => u.hostname === h || u.hostname.endsWith('.' + h))) { shell.openExternal(url); return true; } } catch (e) { /* */ }
+  // روابط الخطوط تقدر تضيفها من الإعدادات ← أي رابط https يفتح في المتصفح
+  try { const u = new URL(url); if (u.protocol === 'https:') { shell.openExternal(u.toString()); return true; } } catch (e) { /* */ }
   return false;
 });
 

@@ -597,22 +597,63 @@
   const genericTrack = 'https://www.track-trace.com/container?number={n}';
   // الخط الناقل للأمر: يدوي، وإلا من بادئة أول حاوية، وإلا من بادئة البوليصة
   // db.carrierMap = بادئات تعلّمها البرنامج من اختيارك اليدوي ({ 'C:TSSU': 'MSC', 'B:8006': 'MSC' })
-  const carrierById = id => CARRIERS.find(c => c.id === id) || { id, name: id, url: genericTrack };
+  // قائمة الخطوط: من الإعدادات (db.carriers) — تبدأ بالقائمة الجاهزة، وتقدر تعدّلها وتضيف عليها
+  const carrierList = db => (db && Array.isArray(db.carriers) && db.carriers.length) ? db.carriers : CARRIERS;
+  const carrierById = (id, db) => carrierList(db).find(c => c.id === id) || CARRIERS.find(c => c.id === id) || { id, name: id, cont: [], bl: [], url: '' };
   const prefixesOf = o => ({ cont: [...new Set(((o.track || {}).containers || []).map(c => String(c.no || '').replace(/\s+/g, '').slice(0, 4).toUpperCase()).filter(Boolean))], bl: String(o.blNo || '').replace(/\s+/g, '').toUpperCase().slice(0, 4) });
   function carrierOf(o, db) {
-    const t = o.track || {}, map = (db && db.carrierMap) || {}, px = prefixesOf(o);
+    const t = o.track || {}, map = (db && db.carrierMap) || {}, px = prefixesOf(o), L = carrierList(db);
     const tag = (c, src) => c ? Object.assign({}, c, { src }) : null;
-    if (t.carrier) return tag(carrierById(t.carrier), 'يدوي');
-    const b = CARRIERS.find(x => px.bl && x.bl.includes(px.bl)); if (b) return tag(b, 'من البوليصة');
-    for (const k of px.cont) { const c = CARRIERS.find(x => x.cont.includes(k)); if (c) return tag(c, 'من الحاوية'); }
-    if (px.bl && map['B:' + px.bl]) return tag(carrierById(map['B:' + px.bl]), 'متعلَّم من البوليصة');
-    for (const k of px.cont) if (map['C:' + k]) return tag(carrierById(map['C:' + k]), 'متعلَّم من الحاوية');
+    if (t.carrier) return tag(carrierById(t.carrier, db), 'يدوي');
+    const b = L.find(x => px.bl && (x.bl || []).includes(px.bl)); if (b) return tag(b, 'من البوليصة');
+    for (const k of px.cont) { const c = L.find(x => (x.cont || []).includes(k)); if (c) return tag(c, 'من الحاوية'); }
+    if (px.bl && map['B:' + px.bl]) return tag(carrierById(map['B:' + px.bl], db), 'متعلَّم من البوليصة');
+    for (const k of px.cont) if (map['C:' + k]) return tag(carrierById(map['C:' + k], db), 'متعلَّم من الحاوية');
     return null;
+  }
+  // تجهيز قائمة الخطوط في البيانات + إضافة أي ناقل جديد تلقائيًا:
+  // - الخطوط الجاهزة الناقصة تنضاف (إلا اللي حذفتها)، والبادئات المتعلَّمة القديمة (carrierMap) تنتقل للقائمة
+  // - أي بوليصة تبدأ بـ 4 حروف ما تنتمي لأي خط ← ناقل جديد باسم البادئة (تعدّل اسمه ورابطه من الإعدادات)
+  function syncCarriers(db) {
+    const added = [];
+    if (!Array.isArray(db.carriers) || !db.carriers.length) db.carriers = CARRIERS.map(c => JSON.parse(JSON.stringify(c)));
+    const del = db.carriersDeleted || [];
+    CARRIERS.forEach(c => { if (!del.includes(c.id) && !db.carriers.some(x => x.id === c.id)) db.carriers.push(JSON.parse(JSON.stringify(c))); });
+    db.carriers.forEach(c => { c.cont = c.cont || []; c.bl = c.bl || []; if (c.url == null) c.url = ''; });
+    for (const [k, id] of Object.entries(db.carrierMap || {})) {
+      const c = db.carriers.find(x => x.id === id); if (!c) continue;
+      const arr = k.startsWith('B:') ? c.bl : c.cont, px = k.slice(2);
+      if (!db.carriers.some(x => (k.startsWith('B:') ? x.bl : x.cont).includes(px))) arr.push(px);
+    }
+    delete db.carrierMap;
+    for (const o of Object.values((db.po && db.po.orders) || {})) {
+      if (o.track && o.track.carrier) continue;
+      const px = prefixesOf(o);
+      if (!/^[A-Z]{4}$/.test(px.bl) || del.includes('B:' + px.bl) || carrierOf(o, db)) continue;
+      const c = { id: 'N_' + px.bl, name: px.bl, cont: [], bl: [px.bl], url: '', auto: true, addedAt: new Date().toISOString().slice(0, 10) };
+      db.carriers.unshift(c); added.push(c.name);
+    }
+    return added;
+  }
+  // تعلّم البادئات من اختيارك اليدوي: البادئات المجهولة (أو اللي مع ناقل أضيف تلقائيًا) تنتقل للخط اللي اخترته
+  function learnCarrier(db, o, id) {
+    syncCarriers(db);
+    const c = db.carriers.find(x => x.id === id); if (!c) return [];
+    const px = prefixesOf(o), learned = [];
+    const take = (k, key) => {
+      const owner = db.carriers.find(x => x[key].includes(k));
+      if (owner && owner !== c && !owner.auto) return;
+      if (owner && owner !== c) owner[key] = owner[key].filter(v => v !== k);
+      if (!c[key].includes(k)) { c[key].push(k); learned.push(k); }
+    };
+    px.cont.forEach(k => take(k, 'cont')); if (px.bl && /^[A-Z0-9]{4}$/.test(px.bl)) take(px.bl, 'bl');
+    db.carriers = db.carriers.filter(x => !x.auto || x === c || x.cont.length || x.bl.length);
+    return learned;
   }
   const genericUrl = n => n ? genericTrack.replace('{n}', encodeURIComponent(String(n).replace(/\s+/g, ''))) : '';
   function trackUrl(o, contNo, db) {
     const c = carrierOf(o, db), n = contNo || ((o.track || {}).containers || [])[0] && o.track.containers[0].no || o.blNo || '';
-    return n ? (c ? c.url : genericTrack).replace('{n}', encodeURIComponent(String(n).replace(/\s+/g, ''))) : '';
+    return n ? ((c && c.url) || genericTrack).replace('{n}', encodeURIComponent(String(n).replace(/\s+/g, ''))) : '';
   }
   // الوصول المتوقع (عليه يتحسب الكاش): وصول المنفذ من شيت المخلّص، أو تاريخ الشحن الفعلي (من البوليصة — المحاسب) + مدة الشحن — أيهما أقرب.
   // ما فيه شحن فعلي ← تاريخ تعميد الشحن + مدة الشحن. ما فيه ولا واحد ← الخطة من تاريخ الأمر.
@@ -780,7 +821,7 @@
   }
 
   const Engine = {
-    payTermOf, dueDateOf, CARRIERS, carrierOf, trackUrl, genericUrl, prefixesOf, compute, openPoLines, poSummary, defaultShipStages, trackStageIndex, setTrackStage, trackSummary, poAutoEta, poPrepDays, poExpectedShip, addDaysDate, stageOf, STAGE_LABEL, poPlan, stageDur, isForeign, MAIN_STATUSES, mainStatusOf, dayDiff, poLead, addMonthsDate, fxRate, normsinv, normUnit, normCode, num, toMonth, monthAdd, monthLabel,
+    payTermOf, dueDateOf, CARRIERS, carrierList, syncCarriers, learnCarrier, carrierOf, trackUrl, genericUrl, prefixesOf, compute, openPoLines, poSummary, defaultShipStages, trackStageIndex, setTrackStage, trackSummary, poAutoEta, poPrepDays, poExpectedShip, addDaysDate, stageOf, STAGE_LABEL, poPlan, stageDur, isForeign, MAIN_STATUSES, mainStatusOf, dayDiff, poLead, addMonthsDate, fxRate, normsinv, normUnit, normCode, num, toMonth, monthAdd, monthLabel,
     unitFactor, purchaseFactor, allUnits, emptyDb, defaultSettings, defaultClasses, abc, roundUp, exceptionApplies
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Engine;
