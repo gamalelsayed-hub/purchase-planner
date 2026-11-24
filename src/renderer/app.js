@@ -1440,7 +1440,7 @@
   function filterPanel() {
     const f = mfState();
     const active = mfGroups().filter(([g]) => f[g].length).length + (f.q ? 1 : 0) - (f.main.length && f.stage.length ? 1 : 0);
-    const row = (g, v, n, label, extra = '') => `<label class="frow ${f[g].includes(v) ? 'on' : ''}"><input type="checkbox" data-fchip="${g}" data-v="${esc(v)}" ${f[g].includes(v) ? 'checked' : ''}> <span class="grow">${esc(label || v)}</span>${extra}<span class="small">${fmt(n || 0)}</span></label>`;
+    const row = (g, v, n, label, extra = '') => `<label class="fopt ${f[g].includes(v) ? 'on' : ''}"><input type="checkbox" data-fchip="${g}" data-v="${esc(v)}" ${f[g].includes(v) ? 'checked' : ''}> <span class="grow">${esc(label || v)}</span>${extra}<span class="small">${fmt(n || 0)}</span></label>`;
     const col = (g, label, body, sel) => `<details class="fgroup" data-fg="${g}" ${fgOpen(g) ? 'open' : ''}><summary class="fg-h">${label}${sel ? ` <span class="pill brand">${fmt(sel)}</span> <button class="link" data-act="fclear" data-g="${g}">مسح</button>` : ''}</summary><div class="fg-list">${body}</div></details>`;
     // عمود الحالة (شجرة)
     const base = masterRows(['main', 'stage']);
@@ -1452,7 +1452,7 @@
     const node = (st, grp) => (cM.get(st) || f.main.includes(st)) ? row('main', st, cM.get(st)) + (grp ? `<div class="fg-sub">${stageList(grp)}</div>` : '') : '';
     const shipN = SHIPPED_ST.reduce((a, x) => a + (cM.get(x) || 0), 0), shipAll = SHIPPED_ST.every(x => f.main.includes(x)), shipSome = SHIPPED_ST.some(x => f.main.includes(x));
     const tree = node('بانتظار الاعتماد', '') + node('صادر', 'issued') +
-      (shipN || shipSome ? `<label class="frow ${shipAll ? 'on' : ''}"><input type="checkbox" data-fparent="ship" ${shipAll ? 'checked' : ''} ${shipSome && !shipAll ? 'data-indet="1"' : ''}> <span class="grow"><b>مشحون</b></span><span class="small">${fmt(shipN)}</span></label>
+      (shipN || shipSome ? `<label class="fopt ${shipAll ? 'on' : ''}"><input type="checkbox" data-fparent="ship" ${shipAll ? 'checked' : ''} ${shipSome && !shipAll ? 'data-indet="1"' : ''}> <span class="grow"><b>مشحون</b></span><span class="small">${fmt(shipN)}</span></label>
         <div class="fg-sub">${SHIPPED_ST.map(x => (cM.get(x) || f.main.includes(x)) ? row('main', x, cM.get(x), x.replace('مشحون — ', '')) : '').join('')}${stageList('shipped')}</div>` : '') +
       node('وصل المستودع', 'arrived');
     let cols = col('main', 'الحالة', tree, f.main.length + f.stage.length);
